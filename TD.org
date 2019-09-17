@@ -1,0 +1,37 @@
+
+
+
+** TD 1 : Semaine
+
+Rappels systèmes et introduction au noyau Unix.
+
+*** Question 1 : Quel est l'intérêt de déclarer une variable en register ?
+
+Le temps d'accès à un registre est particulièrement bas. Si on sait qu'une variable devra être lue souvent, il peut être bon pour la vitesse d'exécution de mettre la variable dans le registre.
+
+
+*** Question 2 : Que fait le programme suivant ?
+
+#+BEGIN_SRC c
+  f(from, to, count)
+  int *from, *to;
+  register count;
+
+  {
+	  register *f, *t;
+	  f = from;
+	  t = to;
+	  do
+		  ,*t++ = *f++;
+	  while(--count);
+  }
+#+END_SRC
+
+Le programme prend en paramètre deux pointeurs vers entier, et un entier count.
+
+La copie locale du paramètre count doit être mis dans un registre si possible.
+
+Le programme déclare ensuite deux pointeurs vers des entiers f et t, et demande à les mettre dans le registre. Il donne aux deux pointeurs ainsi créés les valeurs des deux paramètres from et to en entrée.
+
+Le choix est judicieux : les variables appelées à être souvent modifiées (t, f, et count) sont mises dans un registre, celles destinées à n'être lues qu'une fois (from, to) se contentent de la mémoire centrale. Il n'est pas sûr que ce paramètre explicite soit nécessaire en 2019 : on pourrait estimer gcc capable de faire cette optimisation seul.
+

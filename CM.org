@@ -1,0 +1,86 @@
+#+TITLE : Prise de notes CM 4I401 NOYAU
+#+PROPERTY: header-args :mkdirp yes
+#+STARTUP: inlineimages
+
+Pierre Sens (pierre.sens@lip6.fr)
+4I401
+
+* Informations pratiques
+
+Décalage 1 semaine entre cours et TD.
+
+40 % ER 1 + 60 % ER 2
+
+M.J. Bach, _Conception du système UNIX_
+
+* Cours 1 : 16/09/2019
+
+Le but est de regarder comment les mécanismes sont implémentés (suite du cours NSY103) : on ne programme pas au-dessus du système en utilisant ses API, on regarde comment ces dernières sont implémentées.
+
+Notions :
+- Processus comme instance d'un programme géré par l'OS, avec contexte, construction et destruction
+- Ordonnancement comme attribution des processeurs aux beaucoup plus nombreux processus
+- Les entrées-sorties et le système de gestion de fichiers (et l'implémentation de la notion de fichier)
+- La mémoire virtuelle et la mémoire physique, correspondance, cache, défaut, et traduction.
+
+** Machine what ?
+
+Machine est au fond une machine de Neumann :
+
+CPU, mémoire centrale, périphérique, bus système et contrôleurs d'entrée-sortie (des processeurs spécialisés).
+
+*** Les caches :
+
+Registre processeur <1ns
+Cache L1 ~1ns
+Cache L2 2-3 ns
+Cache L3 ????
+Mémoire centrale 10-50 ns
+
+Disque 10 ms (1 million de fois plus de temps) (pas SSD, plus rapide)
+
+On peut imaginer plusieurs architectures de cache en cas de multi-coeur (les registres et le cache L1, L2, L3 sont-ils spécifiques à chaque coeur ou commun).
+
+Sur l'architecture canonique actuelle (multi-coeur), on partage à partir du cache L2.
+
+** OS what ?
+
+Un logiciel, un code ("soft") chargé de discuter avec la machine.
+
+Un ensemble de pilotes chargés de commander les périphériques.
+
+La gestion du cache, des processus, des communications interprocessus, de la mémoire, et du système de fichier.
+
+** unix what ?
+
+Système interactif en temps partagé, multi-utilisateur et multi-tâches.
+
+10000 lignes de C (version 6, 1976), fait pour être simple, pour les mini-PC.
+
+Normalisations, la plus importante étant POSIX. Linux, presque totalement POSIX-compliant, réconcilie plus ou moins les différentes versions de unix.
+
+- Temps partagé
+- Isolation des contextes mémoire
+- Gestion des fichiers
+
+** Process what ?
+
+Exécution, instance d'un programme. Correspond à un contexte mémoire et un contexte processeur (valeurs des registres et des caches).
+
+Le système d'exploitation n'a pas de processus, il vit autour de la zone des processus et il l'enveloppe. En fait, le code de l'OS n'est exécuté qu'appelé par un processus (appel système, trappe, interruption, signal).
+
+Dans le contexte mémoire (il est question ici de la mémoire virtuelle du processus, la mémoire immense que le processus voit, bien supérieur à la mémoire physique de l'ordinateur), il y a le code, les données, la pile, puis un espace vide immense dans lequel on peut entasser pourvu que le langage le permette.
+
+Dans le contexte processeur (apparemment aussi appelé contexte matériel), il y a des registres (le compteur ordinal, le Program Counter, le pointeur de la prochaine instruction à exécuter).
+
+** BIOS what ?
+
+Une espèce de mini-OS qui dialogue avec les différents périphérique, puis il charge l'OS du disque. Il faut un bootstrapper pour charger les différents OS (il charge le bloc 0 d'un disque indiqué, appelé MBR). Le bootloader doit tenir sur ce bloc, il est donc minuscule.
+
+* Annexes
+
+Support de cours :
+
+[[./CM1/cours1.pdf][Cours 1]]
+[[./CM2/cours2.pdf][Cours 2]]
+
