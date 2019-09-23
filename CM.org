@@ -77,6 +77,42 @@ Dans le contexte processeur (apparemment aussi appelé contexte matériel), il y
 
 Une espèce de mini-OS qui dialogue avec les différents périphérique, puis il charge l'OS du disque. Il faut un bootstrapper pour charger les différents OS (il charge le bloc 0 d'un disque indiqué, appelé MBR). Le bootloader doit tenir sur ce bloc, il est donc minuscule.
 
+
+* Cours 2 : 23/09/2019
+
+Le tas est une sous-zone de la section des données.
+
+En vrai, la section de données contient :
+- les variables globales
+- l'allocation dynamique
+
+Quand un programme a plusieurs instances, on se permet de ne charger qu'une version du code dans la mémoire.
+
+(sous BSD Unix) Une structure commune aux deux processus garde le nombre de processus qui se servent de ce code (pour éviter qu'il soit flush à la fin de l'exécution de l'un d'entre eux). Les processus qui partagent le même code sont chaînés entre eux.
+
+Ce sont les processus qui exécutent le code du système.
+
+** Comment gère-t-on les processus ?
+
+Il existe dans la zone mémoire du noyau une table des processus, qui contient un ensemble de structures.
+
+
+[insérer ici les images du cours CNAM]
+Qu'y a-t-il dans la structure proc ?
+- pid
+- Le pointeur vers la zone U
+- Etat du processus (prêt, en E/S, élu)
+- Pointeurs vers plusieurs listes de processus
+
+Qu'y a-t-il dans la zone U ?
+- Le bloc de contrôle de processus
+- le pointeur vers la structure proc
+- uid, gid, etc...
+
+*** Les états du processus
+
+[insérer une image, préférablement du cours de Joelle]
+
 * Annexes
 
 Support de cours :
