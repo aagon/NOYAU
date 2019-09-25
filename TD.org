@@ -1,14 +1,16 @@
+#+TITLE : Prise de notes TD 4I401 NOYAU
+#+PROPERTY: header-args :mkdirp yes
+#+STARTUP: inlineimages
 
+Jonathan Lejeune(jonathan.lejeune@lip6.fr)
 
-
-** TD 1 : Semaine
+* TD 1 : 25/09/2019
 
 Rappels systèmes et introduction au noyau Unix.
 
 *** Question 1 : Quel est l'intérêt de déclarer une variable en register ?
 
 Le temps d'accès à un registre est particulièrement bas. Si on sait qu'une variable devra être lue souvent, il peut être bon pour la vitesse d'exécution de mettre la variable dans le registre.
-
 
 *** Question 2 : Que fait le programme suivant ?
 
@@ -34,4 +36,251 @@ La copie locale du paramètre count doit être mis dans un registre si possible.
 Le programme déclare ensuite deux pointeurs vers des entiers f et t, et demande à les mettre dans le registre. Il donne aux deux pointeurs ainsi créés les valeurs des deux paramètres from et to en entrée.
 
 Le choix est judicieux : les variables appelées à être souvent modifiées (t, f, et count) sont mises dans un registre, celles destinées à n'être lues qu'une fois (from, to) se contentent de la mémoire centrale. Il n'est pas sûr que ce paramètre explicite soit nécessaire en 2019 : on pourrait estimer gcc capable de faire cette optimisation seul.
+
+Le but du programme est de copier une certain nombre d'entiers contigus (exactement count entiers) de l'adresse from à l'adresse to.
+
+L'incrémentation se fait après la copie : opérateur d'incrémentation post-fixé.
+
+La décrémentation de count se fait avant le test du while : opérateur pré-fixé.
+
+*** Question 3
+
+Soit un tableau t d'une structure quelconque x
+
+#+BEGIN_SRC c
+  struct x {
+	  int x_a;
+  } t[MAX];
+#+END_SRC
+
+
+Ce code permetdde parcourir la structure. (cpt stocke la somme des éléments du tableau).
+
+#+BEGIN_SRC c
+  int i, cpt;
+  cpt = 0;
+  for (i = 0; i < MAX; ++i) {
+	  cpt += t[i].x_a;
+  }
+#+END_SRC
+
+Ecrire un code qui permet de parcourir la structure en utilisant un pointeur vers la structure.
+
+On doit pouvoir donner une condition d'arrêt. On peut soit déclarer une variable i, l'incrémenter en même temps que le pointeur, soit se servir de MAX (on ne sait pas si MAX est une variable locale ou globale, ou un alias, ou quoi que ce soit).
+
+
+
+#+BEGIN_SRC c
+  int cpt = 0;
+  int i = 0;
+
+  for (; i < MAX; p++, i++) cpt =+ p->x_a;
+#+END_SRC
+
+On part bien entendu du compte que MAX est connu dans la portée du code.
+
+Bonne solution :
+
+#+BEGIN_SRC c
+  int cpt = 0;
+  struct x *p;
+
+  for (p = t; p < t + MAX; ++p) {
+	  cpt += p->x_a;
+  }
+#+END_SRC
+
+En effet, on peut garder l'adresse du début du tableau dans une autre variable. Quand la différence entre l'adresse dynamique et l'adresse de départ atteint MAX, on s'arrête.
+
+*** Question 4
+
+CPU : Central processing unit, fait les opérations arithmétiques et logiques, charge des zones de mémoire centrale dans sa mémoire personnelle, décharge sa mémoire personnelle dans la mémoire centrale.
+
+Les registres sont le nom donné à la mémoire personnelle du processeur (accessible en un cycle).
+
+RAM : La mémoire centrale, non-persistante (contenu disparaît à l'extinction de la machine). Permet d'accéder directement à un octet donné.
+
+La mémoire morte est une zone de mémoire sans droits d'écriture dans laquelle on peut écrire le bios, par exemple.
+
+Interruption (trappe) : Signal matériel (par opposition aux signaux, qui sont des entités logicielles), qui demande au système d'exploitation de reprendre la main pour faire des trucs. L'appel système est une sorte d'interruption logicielle.
+
+Comment le CPU communique-t-il avec le matériel ? Via les interruptions et les contrôleurs (en fait des processeurs monotâche).
+
+DMA (Direct Memory Access) : permet aux contrôleurs d'I/O d'accéder directement à des zones mémoire intéressantes (sans avoir besoin de passer par un tampon).
+
+*** Question 5
+
+La mémoire virtuelle, c'est la manière dont le processeur voit la mémoire, qui ne correspond pas à la mémoire physique.
+
+C'est l'ensemble des adresses mémoire accessible par le processeur (qui dépend directement de la taille de son mot d'instruction). La correspondance entre les adresses de mémoire virtuelle et celles de mémoire physique est faite par le MMU (Memory Management Unit), une zone du processeur (ou un processeur spécifique). Le MMU dispose d'un cache appelé TLB (Translation Local-side Buffer).
+
+Chaque processus dispose d'une table des pages qui stocke l'adresse des différents segments et pages, à laquelle le MMU accède, fait son calcul, et accède à l'adresse physique correspondante.
+
+*** Question 6
+
+La commutation de contexte :
+
+La commutation de contexte est l'opération qui consiste à remplacer dans le processeurs et la mémoire centrale les données qui permettent l'exécution d'un processus, par celles qui permettent l'exécution d'un autre processus.
+
+(Déjà, on ne choisit pas quand on commute, c'est le noyau)
+La commutation se fait seule quand le quantum d'un processus est épuisé, à la suite d'une interruption d'horloge. Concrètement, lorsqu'une commutation commence, on copie le contexte processeur (les registres) et le contexte mémoire noyau (ce qui, dans la partie noyau de la mémoire, fait référence au processus courant) qqpart dans la mémoire centrale, et on charge à la place depuis un endroit en mémoire centrale le contexte processeurs et le contexte mémoire noyau.
+
+*** Question 7
+
+Les segments sont des zones de la mémoire spécifiques à un processus qui partagent les mêmes permissions. On les distingue traditionnellement entre les données (dans lesquelles on trouve le tas), accessibles en lecture et en écriture, le code (dans laquelle on va trouver les instructions du processus), accessible seulement en lecture, et la pile (pour les variables locales des fonctions), accessible en lecture et en écriture.
+
+Le CPU y accède (s'il en a le droit !) via une instruction de son jeu d'instruction (load word, load byte), qui est transmise au MMU.
+
+#+BEGIN_SRC c
+  #include <stdio.h>
+
+  int x = 37;
+
+  void f(int a, int b)
+  {
+	  int i = 17;
+	  int j = a + b + i;
+	  printf("Hello : %d\n", i);
+	  i = 45;
+  }
+
+  void g()
+  {
+	  int *i = (int*)malloc(sizeof(int) * 5);
+	  f(3, 4);
+  }
+
+  int main()
+  {
+	  g();
+	  return 0;
+  }
+#+END_SRC
+
+Dessin du contexte mémoire :
+
+
+|   | @code après g |      |
+|---+---------------+------|
+|   |       @malloc | f    |
+|   | @code après f |      |
+| b |             4 |      |
+| a |             3 |      |
+| i |            45 |      |
+| j |            24 |      |
+|   |               |      |
+|   |               |      |
+|   |               |      |
+|   |               |      |
+|---+---------------+------|
+|   |               | tas  |
+|---+---------------+------|
+| x |            37 | glob |
+
+*** Aparté
+
+Processus : instance d'exécution d'un programme, et *son contexte et flux d'exécution*.
+
+*** Question 8
+
+En mode système, un certain nombre d'instructions spéciales et de registres spéciaux du processeurs sont accessibles en plus de celles accessibles en mode usager.
+
+Il y a ces différences parce qu'on ne veut pas que l'usager puisse casser le matériel en accédant à des instructions ou des registres auquel il n'a pas droit.
+
+Dans un processeur MIPS, il y a un registre système qui garde si l'exécution courante se fait en mode sytème ou en mode utilisateur.
+
+PDP-11 ?
+
+Il y aussi une certaine zone de mémoire qui apparaît en mode S : en fait, une deuxième pile apparaît, la pile S, spécifique à un processus (distincte de la zone des données du systèmes, qui regroupe les variables globales à tous les processus).
+
+La pile S sert à sauvegarder les appels de fonction du noyau, les variables locales des fonctions qui y sont exécutées (c'est une pile, après tout).
+
+
+*** Question 9
+
+Un appel système, c'est une interruption logicielle qui permet à un processus de faire appel à des ressources du système en mode noyau, auxquelles il est seulement possible d'accéder en mode noyau.
+
+Appel système : fonction du système appelée à partir du mode utilisateur.
+
+*** Question 10
+
+Interruption (trappe) : Signal matériel (par opposition aux signaux, qui sont des entités logicielles), qui demande au système d'exploitation de reprendre la main pour faire des trucs.
+
+*** Question 11
+
+Il est très important qu'il y ait deux piles :
+- on veut définir des autorisations différentes sur ces deux piles
+- on veut que le processus en mode système puisse accéder à ses propres variables privées, éventuellement à des variables globales.
+
+La pile S étant critique, elle peut être définie pour ne jamais être vide. On ne saurait donner les mêmes droits à un mode U (on ne fait pas confiance au programme).
+
+Pourquoi une pile S par processus ?
+Chaque processus a un contexte mémoire dans le noyau (dans la partie noyau de la mémoire).
+
+Il faut sauver un contexte d'exécution des fonctions systèmes par processus. Précisément parce qu'on a la possibilité de sortir "pas proprement" du mode système, et donc que la pile S n'est pas propre, il en faut plusieurs, une par processus.
+
+*** Question 12
+
+Structure proc
+
+p_flag : vecteur de bits, correspond à des états secondaires du processus
+p_stat : vecteur de bits, correspondant à des états d'ordonnancement
+p_textp : pointeur vers une structure de type texte, qui lui-même pointe vers le code du programme
+
+On a une déclaration d'un tableau de cette structure : c'est une variable globale, avec NPROC nombre maximal de processus existants à n'importe quel moment.
+
+(résultat de ps(1), avec option -aux)
+
+
+Structure user
+
+Tableaux de sauvegarde des registres, selon les cas.
+Pointeur vers la structure proc correspondance.
+
+u_ofile : tableau des descripteurs de fichier.
+u_signal : Handler de signal
+u_cdir : pointeur vers inode du répertoire courant
+
+Une instance de la structure user existe pour chaque processus, elle est déclarée : la variable u est toujours peuplée de la structure du processus courant.
+
+Informations moins importantes que dans la structure proc : peuvent être swappées, contrairement à proc.
+
+Les informations de proc sont vitales, en particulier pour l'ordonnancement.
+
+*** Question 13
+
+Zone U :
+
+Pile S + struct u (l'instance de la structure user)
+
+Une seule zone U active fonctionnelle, à un moment précis.
+
+Etat de la mémoire virtuelle à un moment précis :
+
+| S     | Zone U          | Dynamique |
+| S     | Code du système | Statique  |
+|-------+-----------------+-----------|
+| S + u | Pile            | Dynamique |
+| S + u | Données (tas)   | Dynamique |
+| S + u | Texte (Code)    | Dynamique |
+
+Par dynamique, on entend que la région de mémoire physique vers laquelle pointe la zone change avec chaque commutation.
+Le code du système reste toujours mappé vers la même zone de mémoire physique, quel que soit le processus exécuté.
+
+u.u_procp->p_pid donne le pid du processus courant.
+
+*** Question 14
+
+PID pour chaque processus, pourquoi et comment attribué ?
+
+Identification unique.
+
+Compteur global, incrémenté à chaque création de processus (retour à partir d'une certaine valeur). On a la possibilité d'avoir plusieurs processus qui dans la vie de la machine ont eu le même pid (mais pas en même temps).
+
+*** Question 15
+
+BIOS what ?
+
+Le code chargé au démarrage de la machine, teste le matériel, et lance l'exécution du système.
+
 

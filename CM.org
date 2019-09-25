@@ -13,6 +13,7 @@ Décalage 1 semaine entre cours et TD.
 
 M.J. Bach, _Conception du système UNIX_
 
+
 * Cours 1 : 16/09/2019
 
 Le but est de regarder comment les mécanismes sont implémentés (suite du cours NSY103) : on ne programme pas au-dessus du système en utilisant ses API, on regarde comment ces dernières sont implémentées.
@@ -112,6 +113,7 @@ Qu'y a-t-il dans la zone U ?
 *** Les états du processus
 
 [insérer une image, préférablement du cours de Joelle]
+
 
 * Annexes
 
