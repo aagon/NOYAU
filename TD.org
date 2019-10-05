@@ -284,3 +284,242 @@ BIOS what ?
 Le code chargé au démarrage de la machine, teste le matériel, et lance l'exécution du système.
 
 
+
+* TD 2 : 02/10/2019
+
+On traite aujourd'hui de la synchronisation entre processus.
+
+*** Question 1
+
+On doit prendre garde à la fonction noyau sleep (à ne pas confondre avec l'appel système sleep(3) ou avec la commande shell sleep(1))
+
+#+BEGIN_SRC c
+  int sleep(caddr_t chan, int pri);
+#+END_SRC
+
+le processeur appelant va se mettre en attente sur l'adresse chan (la ressource avec lequel on se synchronise), et se réveillera avec la priorité pri.
+
+#+BEGIN_QUOTE
+Give up the processor till a wakeup occurs on chan, at which time the process enters the scheduling queue at priority pri. The most important effect of pri is that when pri<=PZERO a signal cannot disturb the sleep ; if pri >PZERO signals will be processed. Callers of this routine must be prepared for premature return, and check that the reason for sleeping has gone away.
+#+END_QUOTE
+
+La fonction noyau wakeup :
+
+#+BEGIN_SRC c
+  int wakeup(caddr_t chan);
+#+END_SRC
+
+*** Question 3 bis
+
+Seulement avec les fonctions sleep et wakeup, coder deux fonctions noyau newtemp et hot.
+
+newtemp est appelé par la sonde, avec en paramètre  : pour faire quoi ?
+On ne sait pas ce que les fonctions doivent faire.
+
+hot est censée être appelée par d'autres processus, tourner en boucle, et se terminer dès lors que la température t passée en paramètre est dépassée.
+
+Or hot ne peut pas connaître la température, il n'existe pas de fonction qui permettre d'obtenir la température.
+
+La solution passe par les variables globales du noyau : en effet, newtemp peut se contenter d'enregistrer la température dans cette variable globale.
+
+#+BEGIN_SRC c
+  // PRI_TEMP est un define
+
+  int cpt = 0;
+  int curtemp = -20000;
+
+  void newtemp(int t)
+  {
+	  curtemp = t;
+	  if(cpt) wakeup(&curtemp);
+  }
+
+  void hot(int max)
+  {
+	  int oldmask = gpl();
+	  spl(TEMPHB);
+
+	  cpt++;
+	  while (curtemp <= max) {
+		  sleep(&curtemp,PRI_TEMP);
+		  spl(TEMPHB);
+	  }
+	  cpt--;
+
+	  spl(oldmask);
+  }
+#+END_SRC
+
+L'addresse de tmp est prise au hasard : la seule contrainte, c'est que wakeup et sleep portent sur la même adresse : on aurait pu prendre n'importe quoi.
+
+cpt permet de ne pas avoir à parcourir toute la table : il compte le nombre de processus qui ont appelé hot : on ne lance wakeup que si on sait que le nombre de processus dans 
+
+On peut se permettre de ne pas protéger cpt parce que le noyau dont on parle est non-préemptif : on ne peut pas avoir cpt modifié par plusieurs processus en même temps, ils devraient tous être en mode noyau, or un processus en mode noyau ne lâche le processeur que si il se termine.
+
+*** Analyse de sleep, wakeup et setrun
+
+**** sleep
+
+sleep est appelé par un processus qui souhaite s'endormir.
+
+rp pointe vers la structure proc du processus courant :
+#+BEGIN_SRC c
+  register struct proc *rp = u.u_procp;
+#+END_SRC
+
+spl est le set priority level : fonction qui permet de masquer toutes les interruptions moins prioritaires.
+CLINHB au moins aussi prioritaire que l'horloge : on fait ça pour changer des champs des structures proc, qui elles ont une influence sur l'ordonnanceur.
+
+#+BEGIN_QUOTE
+Interruption, c'est comme si j'appelais une fonction sans l'avoir voulu : les données de la fonction handler de l'interruption sont empilées au-dessus (en-dessous en fait) des données du processus, ce qui fait que quand l'appel est fini, c'est comme si on dépilait.
+#+END_QUOTE
+
+p_wchan est mis à chan l'adresse de l'événement à attendre, p_stat est mis à SLEEP, et p_pri est mis à pri.
+
+Puis on appelle l'ordonnanceur (swtch()) : le moment où on lâche vraiment le processeur, le vrai moment où on s'endort.
+
+dans l'alternative non-prioritaire :
+runin signale au swapper que le processus est swappable, si il a envie.
+
+On doit remettre la condition de traitement du signal après le switch, parce que le PC du processus est sur l'instruction de la ligne 42 : c'est la qu'on reviendra quand le processus récupèrera le processeur : donc on doit remettre l'instruction de traitement du signal avant de sortir de la fonction.
+
+**** wakeup
+
+proc[] est manifestement une variable globale.
+On parcourt toute la table des processus à la recherche du processus qui attendait l'événement passé en argument.
+
+**** setrun
+
+p->p_wchan est une adresse, champ de la structure proc, et représente l'adresse de l'événement que le processus attent (en effet, les sleep et les wakeup sont fait sur une adresse) : il est mis à 0 si le processus n'attend rien.
+
+runrun est une variable globale : si runrun > 0 alors il faudra appeler swtch dès qu'on sort du noyau : grâce à cette variable-là, le noyau peut ne pas être préemptif :
+si je réveille qqn de plus prioritaire que moi, je devrai lui laisser la main, *mais pas avant d'avoir fini ce que je voulais faire dans le noyau*.
+
+Est-ce que le processus que je viens de réveiller a été swappé : si oui, on le rétablit dans la mémoire.
+
+*** Question 4
+
+spl définit le masquage des interruptions jusqu'à un certain niveau passé en paramètre.
+gpl donne en valeur de retour le niveau de masquage des interruptions.
+
+On utilise spl pour protéger les variables globales du noyau.
+
+*** Question 5
+
+Tout de suite, dans la fonction. Pour wakeup, c'est uniquement quand on sort du mode noyau.
+Commutation se fait soit par abandon volontaire du processus, soit à la sortie du mode noyau.
+
+runrun sert à dire s'il faut 
+
+*** Question 6
+
+Processus qui s'occupe de faire le transfert des pages du processus de la mémoire vers le disque, ou vice versa.
+
+*** Question 7
+
+pri de sleep est la priorité à laquelle on veut s'endormir : il compte pour savoir si on est interruptible par signal, et il sert à l'ordonnanceur.
+
+*Ce n'est pas le truc qui est passé en argument de spl !!!*
+
+*** Question 8
+
+Déjà décrit plus haut
+
+*** Question bonus : question annale
+
+L'objectif est de transmettre une valeur générée par un processus à un de ses fils.
+
+On ajoute le champ int p_value à la structure proc.
+
+S'il existe au moins 1 fils, la fonction void send_value(int val) sauvegarde la valeur val dans le champ p_value de la structure proc de l'appelant.
+Cette valeur sera lue par un de ses fils en utilisant la fonction int recv_value(). Cette fonction renvoie la dernière valeur sauvegardée dans le champ p_value de la structure proc du père.
+
+Un processus ne peut pas écrire une nouvelle valeur dans son champ p_value tant qu'un de ses fils n'a pas lu la valeur précédente. Dès lecture d'un fils, le père peut écrire une nouvelle valeur.
+
+Si le père n'a pas écrit de nouvelle valeur, le fils qui appelle recv_value() doit s'endormir jusqu'à qu'une nouvelle valeur soit écrite. (ce qui signifie qu'une valeur ne saurait être lue deux fois)
+
+
+En gros, on cherche à implémenter un tube :
+
+
+On peut endormir le processus qui appelle la fonction send_value (le processus père, donc) après qu'il a mis à jour la valeur : il sera réveillé par le processus fils qui aura lu la valeur : il pourra sortir de la fonction send_value en train d'être exécutée, et à ce moment là en lancer une nouvelle.
+
+Sinon, une variable globale indique si la valeur est lisible ou non, et elle bloque le père ou les fils selon les cas. Il faut protéger cette variable pendant son édition (sections critiques à déterminer.)
+
+Si la variable globale est à 0 et que des fils veulent lire la variable, ils sont endormis. Au moment où on remet la variable à 1, on wakeup les fils, et on commande un coup d'ordonnanceur pour la sortie du mode noyau.
+
+Si la variable globale est à 1 et que le père veut écrire sur la variable, il est endormi. Au moment où la variable est remise à 0, on wakeup le père, et on commande un coup d'ordonnanceur pour la sortie du mode noyau.
+
+La vraie bonne manière de placer la variable, c'est de rajouter un champ dans la structure proc, appelé p_msgstate, initialisé à 0 pour tout le monde.
+
+edit : le mieux du mieux, c'est d'en rajouter deux : un pour les messages à recevoir (qui viennent du haut), un pour les messages à envoyer (qui vont en bas).
+
+p_msgstatedown et p_msgstateup, tous deux initialisés à 0.
+
+#+BEGIN_SRC c
+  void send_value(int val)
+  {
+	  register struct proc *rp = u.u_proc;
+	  register struct proc *p = NULL;
+
+	  // vérifier si des fils existent. Si aucun existe, on termine la fonction.
+
+	  for (p = proc; p < &proc[NPROC]; p++) {
+		  if (p->p.ppid == rp->p.pid) {
+			  break;
+		  }
+	  }
+
+	  // Si on a au moins un fils :
+	  if (p != &proc[NPROC] ) {
+		  spl(PRIO);
+		  while (rp->p_msgstatedown) {
+			  sleep(&(rp->p_msgstatedown), PRIORITE);
+		  }
+
+		  spl(PRIO); // Apparemment pas nécessaire
+		  rp->p_value = val;
+		  rp->p_msgstatedown = 1;
+		  spl(NORMAL);
+
+		  // Réveiller les éventuels fils
+		  wakeup(&(rp->p_msgstatedown));
+	  }
+
+  }
+
+
+  int recv_value()
+  {
+	  register struct proc *pere, moi = u.u_procp;
+
+	  for (pere = moi; pere < &proc[NPROC]; pere++) {
+		  if (pere->p_pid == moi->p_ppid) {
+			  break;
+		  }
+	  }
+
+	  while (pere->p_msgstateup) {
+		  sleep(&(pere->p_value), PZERO);
+	  }
+
+	  pere->p_msgstateup = 1; //ou 0, je me rappelle plus
+	  wakeup(&(pere->p_value)); //problème ici : pas cohérent
+
+	  return pere->p_value;
+  }
+
+
+
+
+#+END_SRC
+
+
+* Annexes
+
+Les supports de TD :
+
+[[./TDTME.pdf][TD]]
+
+
+

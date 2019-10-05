@@ -115,10 +115,43 @@ Qu'y a-t-il dans la zone U ?
 [insérer une image, préférablement du cours de Joelle]
 
 
+* Cours 3 : 30/09/2019
+
+** Fork, exec, exit
+
+** Les signaux
+
+Les handlers de signaux ne sont pas exécutés en mode noyau, ils ont été écrits par l'utilisateur :
+
+Le mécanisme spécial qui permet de faire en sorte que ce handler soit exécuté en mode utilisateur passe par la manipulation, par le système, de la pile du processus : on sauvegarde la valeur du compteur ordinal, on pose le compteur ordinal sur l'adresse de la fonction handler, et on rétablit à la sortie de la fonction handling.  
+
+#+BEGIN_QUOTE
+sendsig()
+must prepare the registers and stack of the current process to
+invoke the signal handler stored in the process's struct sigacts.
+This may include switching to an alternate signal stack specified
+by the process.  The previous register, stack, and signal state
+are stored in a ucontext_t, which is then copied out to the user's
+stack.
+#+END_QUOTE
+
+** Les interruptions
+
+Lors du traitement d'une interruption qui manipule des sections critiques de la section noyau de la mémoire ou des registres, on ne doit traiter aucune autre interruption : on masque toutes les interruptions à l'aide de set-priority-level le temps que les ressources critiques finissent d'être traitées.
+
+
+
+
+
+** Synchronisation
+
+
+
 * Annexes
 
 Support de cours :
 
 [[./CM1/cours1.pdf][Cours 1]]
 [[./CM2/cours2.pdf][Cours 2]]
+
 
