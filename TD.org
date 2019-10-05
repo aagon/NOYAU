@@ -54,7 +54,7 @@ Soit un tableau t d'une structure quelconque x
 #+END_SRC
 
 
-Ce code permetdde parcourir la structure. (cpt stocke la somme des éléments du tableau).
+Ce code permet de parcourir la structure. (cpt stocke la somme des éléments du tableau).
 
 #+BEGIN_SRC c
   int i, cpt;
@@ -189,12 +189,11 @@ Il y a ces différences parce qu'on ne veut pas que l'usager puisse casser le ma
 
 Dans un processeur MIPS, il y a un registre système qui garde si l'exécution courante se fait en mode sytème ou en mode utilisateur.
 
-PDP-11 ?
+PDP-11 ? [Pas traité ici]
 
 Il y aussi une certaine zone de mémoire qui apparaît en mode S : en fait, une deuxième pile apparaît, la pile S, spécifique à un processus (distincte de la zone des données du systèmes, qui regroupe les variables globales à tous les processus).
 
 La pile S sert à sauvegarder les appels de fonction du noyau, les variables locales des fonctions qui y sont exécutées (c'est une pile, après tout).
-
 
 *** Question 9
 
