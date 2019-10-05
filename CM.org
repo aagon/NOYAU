@@ -118,7 +118,6 @@ Qu'y a-t-il dans la zone U ?
 * Cours 3 : 30/09/2019
 
 ** Fork, exec, exit
-
 ** Les signaux
 
 Les handlers de signaux ne sont pas exécutés en mode noyau, ils ont été écrits par l'utilisateur :
@@ -139,12 +138,9 @@ stack.
 
 Lors du traitement d'une interruption qui manipule des sections critiques de la section noyau de la mémoire ou des registres, on ne doit traiter aucune autre interruption : on masque toutes les interruptions à l'aide de set-priority-level le temps que les ressources critiques finissent d'être traitées.
 
-
-
-
+(il s'agit de la fonction spl qu'on voit dans le code source de UNIX en TD)
 
 ** Synchronisation
-
 
 
 * Annexes

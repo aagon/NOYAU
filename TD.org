@@ -296,7 +296,7 @@ On doit prendre garde à la fonction noyau sleep (à ne pas confondre avec l'app
   int sleep(caddr_t chan, int pri);
 #+END_SRC
 
-le processeur appelant va se mettre en attente sur l'adresse chan (la ressource avec lequel on se synchronise), et se réveillera avec la priorité pri.
+le processus appelant va se mettre en attente sur l'adresse chan (la ressource avec lequel on se synchronise), et se réveillera avec la priorité pri.
 
 #+BEGIN_QUOTE
 Give up the processor till a wakeup occurs on chan, at which time the process enters the scheduling queue at priority pri. The most important effect of pri is that when pri<=PZERO a signal cannot disturb the sleep ; if pri >PZERO signals will be processed. Callers of this routine must be prepared for premature return, and check that the reason for sleeping has gone away.
@@ -322,7 +322,7 @@ Or hot ne peut pas connaître la température, il n'existe pas de fonction qui p
 La solution passe par les variables globales du noyau : en effet, newtemp peut se contenter d'enregistrer la température dans cette variable globale.
 
 #+BEGIN_SRC c
-  // PRI_TEMP est un define
+  // TEMPHB est un define
 
   int cpt = 0;
   int curtemp = -20000;
@@ -349,11 +349,11 @@ La solution passe par les variables globales du noyau : en effet, newtemp peut s
   }
 #+END_SRC
 
-L'addresse de tmp est prise au hasard : la seule contrainte, c'est que wakeup et sleep portent sur la même adresse : on aurait pu prendre n'importe quoi.
+L'addresse de tmp est prise au hasard : la seule contrainte, c'est que wakeup et sleep portent sur la même adresse : on aurait pu prendre n'importe quoi (mais préfère donner qqch de signifiant, ici )
 
-cpt permet de ne pas avoir à parcourir toute la table : il compte le nombre de processus qui ont appelé hot : on ne lance wakeup que si on sait que le nombre de processus dans 
+cpt permet de ne pas avoir à parcourir toute la table : il compte le nombre de processus qui ont appelé hot : on ne lance wakeup que si on sait que le nombre de processus endormis (donné par cpt) dans l'adresse &curtemp est au moins 1.
 
-On peut se permettre de ne pas protéger cpt parce que le noyau dont on parle est non-préemptif : on ne peut pas avoir cpt modifié par plusieurs processus en même temps, ils devraient tous être en mode noyau, or un processus en mode noyau ne lâche le processeur que si il se termine.
+On peut se permettre de ne pas protéger cpt parce que le noyau dont on parle est non-préemptif : on ne peut pas avoir cpt modifié par plusieurs processus en même temps, ils devraient tous être en mode noyau, or un processus en mode noyau ne lâche le processeur que si il se termine, ou ne sort du mode noyau que s'il le demande explicitement.
 
 *** Analyse de sleep, wakeup et setrun
 
@@ -367,10 +367,12 @@ rp pointe vers la structure proc du processus courant :
 #+END_SRC
 
 spl est le set priority level : fonction qui permet de masquer toutes les interruptions moins prioritaires.
-CLINHB au moins aussi prioritaire que l'horloge : on fait ça pour changer des champs des structures proc, qui elles ont une influence sur l'ordonnanceur.
+CLINHB au moins aussi prioritaire que l'horloge : on fait ça pour changer des champs des structures proc, qui ont une influence sur l'ordonnanceur : *ces champs sont archi critiques*, c'est uniquement pour cette raison que le noyau se permet cette opération extrêmement violente de masquer toutes les interruptions, même l'interruption horloge.
 
 #+BEGIN_QUOTE
-Interruption, c'est comme si j'appelais une fonction sans l'avoir voulu : les données de la fonction handler de l'interruption sont empilées au-dessus (en-dessous en fait) des données du processus, ce qui fait que quand l'appel est fini, c'est comme si on dépilait.
+Interruption, c'est comme si j'appelais une fonction sans l'avoir voulu : les données de la fonction handler de l'interruption sont empilées au-dessus (en-dessous en fait) des données du processus, ce qui fait que quand l'appel est fini, c'est comme si on dépilait : le stack pointer est directement au bon endroit pour reprendre l'execution directement où elle a été laissée.
+
+Jonathan Lejeune
 #+END_QUOTE
 
 p_wchan est mis à chan l'adresse de l'événement à attendre, p_stat est mis à SLEEP, et p_pri est mis à pri.
@@ -384,7 +386,6 @@ On doit remettre la condition de traitement du signal après le switch, parce qu
 
 **** wakeup
 
-proc[] est manifestement une variable globale.
 On parcourt toute la table des processus à la recherche du processus qui attendait l'événement passé en argument.
 
 **** setrun
@@ -392,7 +393,7 @@ On parcourt toute la table des processus à la recherche du processus qui attend
 p->p_wchan est une adresse, champ de la structure proc, et représente l'adresse de l'événement que le processus attent (en effet, les sleep et les wakeup sont fait sur une adresse) : il est mis à 0 si le processus n'attend rien.
 
 runrun est une variable globale : si runrun > 0 alors il faudra appeler swtch dès qu'on sort du noyau : grâce à cette variable-là, le noyau peut ne pas être préemptif :
-si je réveille qqn de plus prioritaire que moi, je devrai lui laisser la main, *mais pas avant d'avoir fini ce que je voulais faire dans le noyau*.
+Si je réveille qqn de plus prioritaire que moi, je devrai lui laisser la main, *mais pas avant d'avoir fini ce que je voulais faire dans le noyau*.
 
 Est-ce que le processus que je viens de réveiller a été swappé : si oui, on le rétablit dans la mémoire.
 
@@ -408,8 +409,6 @@ On utilise spl pour protéger les variables globales du noyau.
 Tout de suite, dans la fonction. Pour wakeup, c'est uniquement quand on sort du mode noyau.
 Commutation se fait soit par abandon volontaire du processus, soit à la sortie du mode noyau.
 
-runrun sert à dire s'il faut 
-
 *** Question 6
 
 Processus qui s'occupe de faire le transfert des pages du processus de la mémoire vers le disque, ou vice versa.
@@ -418,7 +417,7 @@ Processus qui s'occupe de faire le transfert des pages du processus de la mémoi
 
 pri de sleep est la priorité à laquelle on veut s'endormir : il compte pour savoir si on est interruptible par signal, et il sert à l'ordonnanceur.
 
-*Ce n'est pas le truc qui est passé en argument de spl !!!*
+*Ce n'est pas le truc qui est passé en argument de spl !!!*. On passe en général à spl une valeur défini par un define en en-tête.
 
 *** Question 8
 
@@ -438,7 +437,7 @@ Un processus ne peut pas écrire une nouvelle valeur dans son champ p_value tant
 Si le père n'a pas écrit de nouvelle valeur, le fils qui appelle recv_value() doit s'endormir jusqu'à qu'une nouvelle valeur soit écrite. (ce qui signifie qu'une valeur ne saurait être lue deux fois)
 
 
-En gros, on cherche à implémenter un tube :
+En gros, on cherche à implémenter un tube, avec un problème de lecteur-rédacteur relativement classique :
 
 
 On peut endormir le processus qui appelle la fonction send_value (le processus père, donc) après qu'il a mis à jour la valeur : il sera réveillé par le processus fils qui aura lu la valeur : il pourra sortir de la fonction send_value en train d'être exécutée, et à ce moment là en lancer une nouvelle.
@@ -449,40 +448,43 @@ Si la variable globale est à 0 et que des fils veulent lire la variable, ils so
 
 Si la variable globale est à 1 et que le père veut écrire sur la variable, il est endormi. Au moment où la variable est remise à 0, on wakeup le père, et on commande un coup d'ordonnanceur pour la sortie du mode noyau.
 
-La vraie bonne manière de placer la variable, c'est de rajouter un champ dans la structure proc, appelé p_msgstate, initialisé à 0 pour tout le monde.
+La vraie bonne manière de placer la variable, c'est de rajouter un champ dans la structure proc, appelé p_msgstate, initialisé à 0 pour tout le monde (pas de message).
 
-edit : le mieux du mieux, c'est d'en rajouter deux : un pour les messages à recevoir (qui viennent du haut), un pour les messages à envoyer (qui vont en bas).
 
-p_msgstatedown et p_msgstateup, tous deux initialisés à 0.
 
 #+BEGIN_SRC c
   void send_value(int val)
   {
-	  register struct proc *rp = u.u_proc;
-	  register struct proc *p = NULL;
+	  register struct proc *moi = u.u_proc;
+	  register struct proc *fils = NULL;
 
-	  // vérifier si des fils existent. Si aucun existe, on termine la fonction.
-
-	  for (p = proc; p < &proc[NPROC]; p++) {
-		  if (p->p.ppid == rp->p.pid) {
+	  /*
+	     vérifier si des fils existent. Si aucun existe, on termine la
+	     fonction.
+	  ,*/
+	  for (fils = proc; fils < &proc[NPROC]; p++) {
+		  if (fils->p.ppid == moi->p.pid) {
 			  break;
 		  }
 	  }
 
 	  // Si on a au moins un fils :
-	  if (p != &proc[NPROC] ) {
+	  if (fils != &proc[NPROC] ) {
+
+		  /* Apparemment pas nécessaire */
 		  spl(PRIO);
-		  while (rp->p_msgstatedown) {
-			  sleep(&(rp->p_msgstatedown), PRIORITE);
+		  /* Si j'ai déjà un message dans ma boîte d'envoi, je m'endors */
+		  while (moi->p_msgstatedown) {
+			  sleep(&(moi->p_msgstatedown), PRIORITE);
 		  }
 
 		  spl(PRIO); // Apparemment pas nécessaire
-		  rp->p_value = val;
-		  rp->p_msgstatedown = 1;
+		  moi->p_value = val;
+		  moi->p_msgstatedown = 1;
 		  spl(NORMAL);
 
-		  // Réveiller les éventuels fils
-		  wakeup(&(rp->p_msgstatedown));
+		  /* Réveiller les éventuels fils */
+		  wakeup(&(moi->p_msgstatedown));
 	  }
 
   }
@@ -492,25 +494,42 @@ p_msgstatedown et p_msgstateup, tous deux initialisés à 0.
   {
 	  register struct proc *pere, moi = u.u_procp;
 
-	  for (pere = moi; pere < &proc[NPROC]; pere++) {
+	  /*
+	     La version précédente initialisait à moi la variable pere.
+	     Or si ça se trouve, le père est avant le fils dans la table des
+	     processus. C'est même le plus probable.
+	     On vérifie tous les processus de la table des processus à la
+	     recherche du père.
+	     On suppose que le père ne meurt pas : très important
+	  ,*/
+	  for (pere = proc; pere < &proc[NPROC]; pere++) {
 		  if (pere->p_pid == moi->p_ppid) {
 			  break;
 		  }
 	  }
 
-	  while (pere->p_msgstateup) {
-		  sleep(&(pere->p_value), PZERO);
+	  /*
+	    Si le père n'a pas de message dans sa boîte d'envoi, on s'endort
+	    sur l'adresse de son indicateur de message descendant
+	  ,*/
+	  while (!(pere->p_msgstatedown)) {
+		  sleep(&(pere->p_msgstatedown), PRIORITE);
 	  }
 
-	  pere->p_msgstateup = 1; //ou 0, je me rappelle plus
-	  wakeup(&(pere->p_value)); //problème ici : pas cohérent
+	  /*
+	    Si le père a un message sur sa boîte d'envoi, on lui dit qu'il n'en a
+	    plus, on le réveille s'il s'est éventuellement endormi en essayant
+	    d'en mettre un autre, et on retourne la valeur du message.
+	  ,*/
+
+	  /* On veut que cette suite d'instructions soit atomique */
+	  spl(PRIO);
+	  pere->p_msgstatedown = 0;
+	  wakeup(&(pere->p_msgstatedown));
+	  spl(NORMAL);
 
 	  return pere->p_value;
   }
-
-
-
-
 #+END_SRC
 
 
