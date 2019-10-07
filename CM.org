@@ -143,6 +143,109 @@ Lors du traitement d'une interruption qui manipule des sections critiques de la 
 ** Synchronisation
 
 
+* Cours 4 : 07/10/2019
+
+** Synchronisation, suite
+
+*** sleep et wakeup
+
+Permet la synchronisation. [déjà vu en TD]
+
+Algorithme de sleep, pendant au code du TD :
+
+[[./CM1/sleep.jpg][Algorithme de sleep]]
+
+Implémentation de sleep :
+
+#+BEGIN_SRC c
+  sleep (caddr_t chan, int pri)
+  {
+	  register struct proc *rp = u.u_procp;
+	  register int s, op;
+	  if (pri > PZERO) {
+		  if (issig()) goto psig;
+		  spl(CLINHB);
+		  rp−>p_wchan = chan;
+		  rp−>p_stat = SSLEEP;
+		  rp−>p_pri = pri;
+		  spl(NORMAL);
+		  if (runin != 0) {
+			  runin = 0;
+			  wakeup(&runin);
+		  }
+		  swtch();
+		  if (issig()) goto psig ;
+	  } else {
+		  spl (CLINHB) ;
+		  rp−>p_wchan = chan ;
+		  rp−>p_stat = SSLEEP;
+		  rp−>p_pri = pri ;
+		  spl(NORMAL) ;
+		  swtch();
+	  }
+	  return;
+
+	  /*
+	   If priority was low (>PZERO) and there
+	   has been a signal, execute non−local
+	   goto to the qsav location.
+	  ,*/
+  psig:
+	  aretu(u.u_qsav);
+  }
+#+END_SRC
+
+
+** Commutation
+
+Le registre horloge a été inventé pour le temps partagé.
+
+Il existe un processeur spécifique, tout petit, avec son propre quartz, qui décrémente le registre horloge (Programmable Interval Timer) à une périodicité connue.
+
+en plus de ça, dans les OS modernes, on a une interruption horloge matérielle qui interrompt le processus à des intervalles de temps fixe (les tics, jiffy dans le cas de Linux), qui est une fraction de quantum : on ne commute pas, c'est juste pour traiter les alarmes.
+
+Un quantum peut s'exprimer en tics (en général, 10 tics).
+
+*** Algorithme sous unix
+
+On se rapproche d'un système de round robin, mais pas un vrai round robin au sens où il n'y a pas de queue.
+
+p_usrpri = PUSER + p_cpu/4 + 2*p_nice
+p_cpu = p_cpu * decay
+decay = 1/2 System V Release 3
+decay = (2 * load) / (2*load +1) BSD
+
+
+Version System 5 (avec un decay fixe)
+Quand on a trop peu de processus, ça monte trop vite vers 127
+Quand on a trop de processus, ça descend trop vite vers PUSER
+
+On pourrait ne plus distinguer entre les processus.
+
+BSD s'est permis d'inventer un decay dynamique.
+
+On privilégie les jobs les plus courts : un vrai round robin rendrait les 'ls' très lents. Ce système booste les nouveaux processus.
+
+Ce qui est dit ici n'est vrai que pour les processus utilisateurs : les processus démon ou noyau ne fonctionnent pas comme ça.
+
+**** Trouver les processus le plus prioritaire
+
+32 listes de processus prêts :
+- La liste des processus de priorité 0 à 3
+- La liste des processus de priorité 4 à 7
+etc...
+
+whichqs (4 octets) : un vecteur de 32 bits qui donne son ième bit à 1 si il y a un processus prêt dans la ième liste.
+
+**** La commutation elle-même
+
+Retirer le processus prioritaire de la tête.
+
+Sauvegarder le PCB du processus courant (présent dans la zone U)
+Changer la valeur du registre de la table des pages (proc.p_addr) : où est la table des pages.
+Charger les registres du processus élu à partir de la zone U
+
+
 * Annexes
 
 Support de cours :
