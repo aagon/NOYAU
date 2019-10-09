@@ -533,6 +533,308 @@ La vraie bonne manière de placer la variable, c'est de rajouter un champ dans l
 #+END_SRC
 
 
+* TD 3 : 09/10/2019
+
+On traite aujourd'hui du traitement des signaux.
+
+#+BEGIN_SRC c
+  int kill(pid_t pid, int sig);
+#+END_SRC
+
+Il est bien clair qu'on parle ici de l'appel système, kill(2), et non pas de la fonction du noyau (dont l'implémentation est masquée de l'utilisateur, dépend de l'implémentation de unix).
+
+Moyen rudimentaire de communication.
+
+Traité par le processus !
+
+Unix implémente la "boîte à diodes" des signaux entrants sous la forme d'un vecteur de bits. Diode allumée \to bit à 1.
+(On ne sait donc pas si on a reçu un signal plusieurs fois, ce n'est pas une file d'attente)
+
+On doit savoir quoi faire pour chaque signal : notion de *handler* (une fonction). Si aucun handler défini, on a un comportement par défaut.
+
+Cette fonction est exécutée en mode utilisateur : en effet, ça a été codé par l'utilisateur.
+
+Pour définir un handler de signal, on utilisait l'appel système signal(2):
+
+#+BEGIN_SRC c
+  typedef void (*sighandler_t)(int);
+
+  sighandler_t signal(int signum, sighandler_t handler);
+#+END_SRC
+
+(De nos jours, on utiliserait plutôt sigaction, recommandé par la norme POSIX)
+
+*signal redéfinit le handler de signal de manière provisoire (seulement la prochaine réception) !!*
+
+On doit donc faire appel à signal dans le handler lui-même si on veut garder le handler pour les prochains traitements de signal.
+
+Il y a deux signaux dont on ne peut pas redéfinir les handlers :
+- SIGKILL
+- SIGSTOP
+
+#+BEGIN_QUOTE
+The signals SIGKILL and SIGSTOP cannot be caught or ignored.
+
+man page signal(2)
+#+END_QUOTE
+
+*** Question 1
+
+#+BEGIN_SRC c
+  #include <stdio.h>
+  #include <unistd.h>
+
+  void bonjour(int i)
+  {
+	  printf("Bonjour\n");
+	  signal(SIGALRM, bonjour);
+	  alarm(1);
+  }
+
+  int main()
+  {
+	  bonjour();
+	  while (true) {
+		  sleep(N);
+	  }
+	  return 0;
+  }
+
+#+END_SRC
+
+*** Question 2
+
+Différence signal ignoré et signal masqué.
+
+Les deux ne prennent pas en compte le signal.
+
+Ignorer : Je détruis ce signal (cette occurence du signal, mais pas forcément les occurences futures).
+Masquer : retarder le traitement d'un signal.
+
+(pas de masquage de signaux dans cette version du noyau.
+Soit on les ignore, soit on les traite de manière précise avec un handler)
+
+*** Question 2, TD 2
+
+Rappels des opérateurs bit à bit en C :
+
+AND bitwise : &
+
+3 & 2 : 0b011 & 0b010 = 0b010 soit 2
+(la puissance de 2 l'emporte toujours)
+
+OU bitwise : |
+3 | 2 = 0b011 | 0b010 = 0b011 = 3
+
+NOT bitwise : ~
+~2 = ~0b010 = 0b101 = 5
+
+XOR bitwise : ^
+3^2 = 0b011 ^ 0b010 = 0b001 = 1
+
+SHIFT right : >>
+5>>2 = 0b101>>2 = 0b001 = 1
+
+SHIFT left : <<
+5<<2 = 0b101<<2 = 0b100 = 4
+
+Par exemple, si je veux mettre de manière certaine le ième bit à 1 du vecteur de bit v, je fais :
+#+BEGIN_SRC c
+  v |= (1<<(i-1));
+#+END_SRC
+
+Sinon, pour mettre le ième bit à 0 de manière sûre, je fais :
+#+BEGIN_SRC c
+  v = v & ~(1<<(i-1));
+#+END_SRC
+
+Tester si le ième bit est à 1 :
+#+BEGIN_SRC c
+  (v & (1<<(i-1)));
+#+END_SRC
+
+Tester si le ième bit est à 0 :
+#+BEGIN_SRC c
+  !(v & (1<<(i-1)));
+#+END_SRC
+
+*** Question prof
+
+Trouver dans les structures unix les champs ou variables relatives aux signaux :
+
+**** Dans la structure user (swappable) :
+
+int u_signal[NSIG];
+
+Or NSIG = 19, d'après le fichier d'en-tête sig.h
+
+Donc on a un tableau de 19 entiers ??? (soient 19*32 bits : c'est bien plus qu'il n'en faut)
+
+Contient les pointeurs vers les handlers, en fait. Les int étaient en fait des adresses.
+
+**** Dans la structure proc (toujours en mémoire) :
+
+long p_sig;
+
+Un long est un entier de la taille d'un mot mémoire : ici, on va dire 32 bits : sachant qu'on a 19 signaux, ça suffit.
+
+Les bits de p_sig constituent le vecteur de bits qui donne les signaux reçus par le processus.
+
+short p_clktimer (un truc qui sert à compter le temps avant l'alarme).
+
+*** Question 3
+
+On vient d'y répondre.
+
+*** Question 4
+
+On est bien d'accord qu'on peut assimiler les signaux à des espèces d'interruptions logicielles.
+
+Des différences majeures :
+- Le traitement de l'interruption est toujours exécuté en mode noyau, mais en mode utilisateur dans le cas d'un signal.
+- Emetteur est le matériel dans le cas de l'interruption, le noyau ou le processus dans le cas du signal.
+- Mécanisme matériel, indépendemment du noyau dans le cas de l'interruption, et mécanisme logiciel dans le cas du signal.
+
+*** Question 5
+
+Quels sont les rôles des fonctions kill, psignal, issig, psig, fsig, sendsig et ssig ?
+
+Pourquoi il n'y a pas d'argument à ces fonctions ?
+
+Les arguments sont stockés dans la structure user.
+
+Les fonctions en question sont exécutées sur la pile s : il n'y a rien dans cette pile, elles vont donc chercher leurs arguments dans la structure user du processus.
+
+Le retour de la fonction système est stockée dans une zone R0, pour que la fonction utilisateur appelante puisse récupérer ce retour via son pointeur vers R0 dans sa structure user.
+
+**** La fonction ssig()
+
+On enregistre dans a le premier argument de la fonction utilisateur signal.
+
+a représentera le numéro du signal.
+
+On vérifie que a est valide (pas en dessous de 0, au dessus de 19, ni égale à SIGKIL) : s'il ne l'est pas, on sort de la fonction en rendant une erreur.
+
+On remplit le retour de la fonction via la structure u_ar0
+
+On met à jour le pointeur de fonction (ligne 15) : on met le deuxième argument de la fonction utilisateur signal dans le champ idoine de la structure user du processus.
+
+(0 correspond à par défaut, 1 correspond à ignorer)
+
+On remet à zéro la "diode" du signal.
+
+**** La fonction kill()
+
+On cherche dans la table des processus.
+
+On doit intervertir le numéro du signal et le numéro du pid dans les noyaux modernes.
+
+On met dans a le pid du processus à qui on veut envoyer un signal.
+
+On boucle dans la table des processus :
+- On vérifie que le p_stat du processus bouclé n'est pas NULL. (Il n'y a pas de processus dans ce champ)
+- On vérifie que le pid du processus à signaler n'est pas 0, et que le pid du processus à signaler n'est pas le pid du processus bouclé (s'il ne l'est pas, on passe directement à la prochaine itération)
+- Si le processus à signaler est 0 , ça veut soit dire qu'on veut s'adresser aux processus du même terminal, ou au processus swapper ou au processus init, on skip directement.
+- On vérifie que (on n'est pas root AND on est bien proprio du processus) 
+
+Si ces vérifications sont passées, on incrémente un compteur f et on lance la fonction psignal(p, u.u_arg[0]) (en n'oubliant pas que u.u_arg[0] contient le signal)
+
+psignal a bien des arguments !
+C'est normal, psignal n'est appelé que par d'autres fonctions noyau.
+
+**** La fonction psignal(struct proc_p *p, int sig)
+
+On vérifie que le signal existe bien.
+
+On met le bit idoine du vecteur de bit du processus destinataire à 1 (quel que soit l'état du processus)
+
+Si le processus n'est pas endormi avec une forte priorité, on le réveille.
+
+**** La fonction issig()
+
+Tant que le vecteur de bits du processus courant n'est pas exactement 0 (soit tant qu'on a pas vidé les signaux en attente) :
+
+- On garde dans n le numéro du signal le plus bas (d'après l'analyse de la fonction fsig)
+
+issig retourne le numéro du signal le plus bas reçu s'il y en a un, 0 sinon.
+
+Ca veut dire que les signaux de numéro les plus bas sont traités de manière prioritaire : on peut avoir une famine pour les signaux les 
+
+ligne 84 : si on a 1 au bit de poids faible, on sait qu'on veut ignorer : les adresses des handlers sont forcément alignées sur le mot mémoire, donc multiples de 4
+
+Si on voulait ignorer (ligne 86), on remet le bit correspondant à 0.
+
+**** La fonction fsig(struct proc *p)
+
+Une fonction bien utile : retourne le signal de numéro le plus bas.
+
+**** La fonction psig()
+
+if(issig()) psig(); est la séquence exécutée systématiquement au retour en mode utilisateur.
+
+Une version simplifiée, on ne va pas s'amuser à mettre tous les handlers par défaut.
+
+psig récupère le numéro du signal à traiter dans n.
+Il vérifie que ce n'est pas nul (ça ne devrait pas l'être si on suit la séquence plus haut)
+
+Il remet le bit à 0.
+Si le handler n'est pas 0 (càd si on ne veut pas utiliser le handler par défaut), on va lancer le handler, après l'avoir enlevé de la table des handlers (rappelons-nous, temporaire)
+
+Si le handler est à 0, on fait les traitements par défaut.
+
+**** La fonction sendsig(void *handler, int num)
+
+La fonction charger d'appeler la fonction handler définie par l'utilisateur.
+
+On manipule directement la pile de l'utilisateur pour le faire exécuter la fonction qu'il a lui-même écrite, à sa prochaine sortie du mode noyau.
+
+Dans l'ordre :
+- on enregistre dans sp le pointeur de pile enregistré du processus (u.u_ar0[SP]), pile augmenté d'un mot mémoire (en effet la pile croît de l'adresse la plus haute 0xffffffff vers l'adresse la plus basse 0x00000000).
+- on alloue effectivement la mémoire de 0xffffffff jusqu'à sp (on imagine que la fonction grow alloue effectivement de la mémoire de 0xffffffff, ou un autre point de référence, à l'adresse qui lui est passée en paramètre)
+- On enregistre cette nouvelle adresse modifiée dans le pointeur de pile enregistré du processus (u.u_ar0[SP]) (la pile est maintenant "officiellement" augmentée d'un mot mémoire)
+- On enregistre dans ce mot mémoire qu'on vient d'allouer le PC (Program Count, AKA Compteur Ordinal, l'adresse le l'instruction à exécuter, tya compris fréro) enregistré du processus (u.u_ar0[PC])
+- On met dans cette variable de sauvegarde du registre PC l'adresse de la fonction handler.
+
+De cette manière, quand le processus repasse en mode utilisateur et récupère le processus, il exécute la fonction handler comme si c'était lui qui l'avait appelé.
+
+*** Petit exo type examen
+
+Implémenter un truc qui permet de masquer les signaux.
+
+Requiert de modifier la fonction fsig.
+
+Et de noter qqpart (dans la struct proc du processus) les indicateurs de signaux masqués.
+
+On suppose dans la struct proc un vecteur de bits qui correspondent aux bits masqués.
+
+Si le signal est masqué, fsig ne repère même pas le signal.
+
+En C ANSI :
+
+#+BEGIN_SRC c
+  int fsig(struct proc *p)
+  {
+	  register int n, i, m, r;
+
+	  n = p->p_sig;
+	  m = m->p_mask; // Le vecteur des signaux masqués
+
+	  r = n & ~m; // r correspond au vecteur des signaux non-masqués
+
+	  for (i = 0; i < NSIG; ++i) {
+		  if (r & 1) return (i);
+		  r >>= 1;
+	  }
+
+	  return 0;
+  }
+#+END_SRC
+
+Il faut aussi une fonction noyau pour ajouter un masque dans cette structure, une pour l'enlever. (assez trivial : on a juste un bit à bouger, juste des vérifications chiantes à faire avant)
+
+Il faut aussi modifier la boucle while dans issig, de manière à éviter la boucle infinie (on ne teste plus while de p->p_sig, mais while de (p->p_pig & ~p->p_mask))
+
+
 * Annexes
 
 Les supports de TD :
