@@ -246,6 +246,98 @@ Changer la valeur du registre de la table des pages (proc.p_addr) : où est la t
 Charger les registres du processus élu à partir de la zone U
 
 
+* Cours 5 : 14/10/2019
+
+Temps réel : pas le plus vite possible. Garantit que le temps d'exécution est en-dessous d'une certaine valeur, pas forcément rapide. -> déterministe
+
+On ne laisse pas aux probabilités 
+
+
+Même :
+Ordonnanceur
+Lock
+Entrées/sorties
+Contrôleur mémoire
+
+Extrêmement compliqué :
+code parfait et invariant (ne doit pas dépendre des données)
+spécification exacte du matériel (en général pas possible)
+
+On doit calculer le WCET (Worst Case Execution Time).
+
+On peut bien supposer un nombre d'instructions finies dans l'application :
+- On aura quand même 
+
+SVR4, SVR5 : ordre des priorités est ordonnancé dans l'autre sens que UNIX.
+
+#+BEGIN_QUOTE
+On ne peut pas s'endormir en mode utilisateur
+
+Les priorités >100 sont les priorités utilisateur. Les priorités <100 sont les fonctions noyau (Au-dessus de 0 réveillable et swappable, en dessous non)
+#+END_QUOTE
+
+Pour pouvoir implémenter un système temps réel, on rajoute un champ dans la structure proc qui note la plage (user, noyau, TR) : 
+
+Quantum en temps partagé est inversement proportionnel à la priorité : tâches très longues (batch) qui gagneront peu d'élections, mais qui resteront longtemps, contre des applications interactives un quantum faible 
+
+#+BEGIN_QUOTE
+Si le quantum est suffisemment petit devant la petite tâche, alors le temps avant la fin de l'exécution de la petite tâche ne dépend pas de la durée des grandes, mais uniquement de leur nombre (suppose une espèce de tourniquet, un vrai temps partagé, où toutes les tâches sont traitées à égalité).
+
+Il va falloir faire des quantum petits, mais pas trop : il ne faut pas que la commutation prenne trop de temps.
+#+END_QUOTE
+
+Les tâches temps réel rajoutent une flèche dans l'automate.
+
+On doit laisser la place à la tâche temps-réel (mais le noyau unix v6 n'est pas préemptif) : ça n'est pas possible.
+
+#+BEGIN_DEFINITION
+Noyau non premptif : on ne peut pas changer d'espace d'adressage. (on peut bien sûr être interrompu plusieurs fois).
+Processus est défini par un espace d'adressage.
+#+END_DEFINITION
+
+Un noyau temps réel est nécessairement préemptif.
+
+#+BEGIN_DEFINITION
+Processus : exécution d'une tâche.
+#+END_DEFINITION
+
+#+BEGIN_THEOREM
+Il n'y a que deux façons de quitter le processeur :
+- if(runrun)
+- sleep()
+#+END_THEOREM
+
+Une solution :
+
+Point de réquisition (une espèce de sous-quantum bis)
+Doit être borné en nbr d'instructions, temps de code (difficile à traduire en temps humain)
+
+Une autre solution :
+
+On rend le noyau préemptif. On a un ordre de priorité, 
+
+#+BEGIN_DEFINITION
+Dormir, c'est ne pas participer à l'élection.
+Se réveiller, c'est être candidat à la prochaine élection.
+#+END_DEFINITION
+
+#+BEGIN_DEFINITION
+L'appel système est une interruption volontaire.
+#+END_DEFINITION
+
+Inversion de priorité : les verrous ne tiennent pas compte des priorités !
+Solution est la propagation de la priorité temps-réel.
+
+#+BEGIN_DEFINITION
+Fil d'exécution :
+
+- Pile
+- CO
+- SP
+#+END_DEFINITION
+
+
+
 * Annexes
 
 Support de cours :
