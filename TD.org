@@ -835,6 +835,273 @@ Il faut aussi une fonction noyau pour ajouter un masque dans cette structure, un
 Il faut aussi modifier la boucle while dans issig, de manière à éviter la boucle infinie (on ne teste plus while de p->p_sig, mais while de (p->p_pig & ~p->p_mask))
 
 
+* TD 4 : 16/10/2019
+
+On traite aujourd'hui de la question du temps et de l'ordonnancement.
+
+*** Analyse des structures
+
+L'interruption horloge, ou plutôt sa gestion, est écrite dans le fichier clock.
+
+#+BEGIN_QUOTE
+clock is called straight from real time clock interrupt.
+#+END_QUOTE
+
+La structure callo dans la fichier d'en-tête callo, permet de créer des appels réguliers.
+
+On a un tableau statique de cette structure.
+
+Un define de l'inhibition d'horloge.
+
+Dans la structure proc, p_time, p_clktime, p_cpu.
+p_time définit le temps pendant lequel on a été résident à un endroit précis en mémoire ou dans le swap (remis à 0 dès qu'on est swappé ou déswappé, mais incrémenté tout le temps)
+
+On a SIGALRM
+
+
+On a une fonction accessible à l'utilisateur, time(2), définie comme suit.
+
+#+BEGIN_SRC c
+  #include <time.h>
+
+  time_t time(time_t *tloc);
+#+END_SRC
+
+*** Question 1
+
+Celle-ci fait appel au temps global, soit le nombre de secondes depuis 1/1/1970
+
+
+
+
+**** clock()
+
+On créé deux entiers externes (que signifie ce mot-clé ??).
+
+Un pointeur vers une structure callo, dans un registre.
+
+Un pointeur vers un entier, dans le registre.
+
+On regarde le premier élément du tableau des callouts.
+
+On parcourt le tableau des callouts :
+Si c_time est inférieur à 0 et 
+
+
+
+
+idleflag est à 1 signifie qu'il n'y a aucun processus à élire.
+
+Si l'usage du cpu d'un processus est en-dessous de 80, on incrémente cet usage.
+L'usage du cpu est borné à 80.
+
+On incrémente les stats, en vérifiant bien qu'on est pas idle.
+
+On incrémente lbolt, puis on vérifie qu'il est supérieur ou égal à HZ, si c'est le cas on rajoute le flag WAKEUP.
+
+HZ donne le nombre de ticks qu'on doit avoir en une seconde.
+Quand lbolt arrive à HZ, on sait qu'on a passé une seconde.
+
+On vérifie que le flag WAKEUP est vrai sur iaflags, et on appelle la fonction realtime(). (Ce n'est pas fait dans la fonction clock, mais ailleurs. On croira Jonathan Lejeune sur parole)
+
+**** realtime()
+
+On créé un pointeur vers une structure proc.
+
+On remet lbolt à zéro.
+
+On incrémente la variable globale time.
+
+On incrémente runrun pour forcer une élection juste avant de sortir du mode noyau.
+
+On réveille tout le monde à l'adresse lbolt (Quelqu'un qui veut être réveillé toutes les secondes, souvent des processus qui utilisent des drivers).
+
+On parcourt la table des processus.
+
+Si il y a bien un processus, on incrémente le resident time jusqu'à 127.
+
+Si le temps jusqu'au prochain signal SIGALRM est 0, on traite le signal SIGALRM.
+
+(utilisé par la fonction utilisateur alarm)
+#+BEGIN_SRC c
+  #include <unistd.h>
+
+  unsigned int alarm(unsigned int seconds);
+#+END_SRC
+
+
+On divise le cpu usage par 2 : On applique le decay de l'algorithme d'ordonnancement de UNIX.
+
+Si le processus a une prio faible, on remet à jour sa priorité selon l'algorithme unix, en appelant setpri
+
+Ensuite, si pression mémoire, on réveille le swapper.
+
+**** setpri
+
+En gros applique l'algorithme vu en cours, pour recréer un système de round robin.
+
+*** Question 2
+
+timeout permet de planifier l'exécution d'une fonction dans un certain temps.
+
+Cette fonction prend en argument un pointeur vers une fonction, une chaîne de caractères pour les arguments et un entier qui donne le temps.
+
+On créé deux pointeurs vers des structures callo.
+Deux entiers, dont un dans le registre.
+
+Le premier pointeur vers la structure callo est peuplé avec le premier élément de la table callout.
+
+On met dans un des deux entiers le masquage des interruptions courant.
+On met dans l'autre entier la valeur du paramètre.
+
+On change le masquage des interruptions au niveau le plus puissant (CLINHB).
+
+On parcourt la table callout.
+
+Si on a bien une fonction dans la structure callo courante, et que le temps incrémentiel est en-dessous de t le temps passé en paramètre.
+
+**** Petit exercice
+
+On applique timeout(f, arg_f, 11) et timeout(g, arg_g, 5)
+
+2 interruptions horloges
+
+Puis timeout(h, arg_h, 3)
+
+1 interruption horloge
+
+Puis timeout(i, arg_i, 8)
+
+Dessiner l'état du tableau callout à tout moment (on part du principe que la table est vide au début).
+
+
+Tout est vide
+| i | func | arg | time |
+|---+------+-----+------|
+| 0 |    0 |     |      |
+| 1 |    0 |     |      |
+| 2 |    0 |     |      |
+| 3 |    0 |     |      |
+| 4 |    0 |     |      |
+| 5 |    0 |     |      |
+| 6 |    0 |     |      |
+| 7 |    0 |     |      |
+| 8 |    0 |     |      |
+
+| i | func | arg   | time |
+|---+------+-------+------|
+| 0 |    f | arg_f |   10 |
+| 1 |    0 | '\0'  |  -10 |
+| 2 |    0 |       |      |
+| 3 |    0 |       |      |
+| 4 |    0 |       |      |
+| 5 |    0 |       |      |
+| 6 |    0 |       |      |
+| 7 |    0 |       |      |
+| 8 |    0 |       |      |
+
+| i | func | arg   | time |
+|---+------+-------+------|
+| 0 |    g | arg_g |    4 |
+| 1 |    f | arg_f |    5 |
+| 2 |    0 | '\0'  |  -10 |
+| 3 |    0 |       |      |
+| 4 |    0 |       |      |
+| 5 |    0 |       |      |
+| 6 |    0 |       |      |
+| 7 |    0 |       |      |
+| 8 |    0 |       |      |
+
+[fait au tableau, à refaire]
+
+*** Rappel
+
+A chaque interruption d'horloge :
+- clock()
+- if(iaflag & WAKEUP)  realtime()
+- if(iaflag & CALOUT) restart()
+
+*** Coder la fonction restart
+
+#+BEGIN_SRC c
+  int restart()
+  {
+	  struct callo *p1;
+	  struct callo *p2;
+
+	  while ((&callout[0]->c_time == 0) &&
+		 (&callout[0]->c_func != 0)) {
+
+		  p1 = &callout[0];
+		  ,*(p1->c_func)(p1->c_arg);
+
+		  p2 = p1 + 1;
+
+		  while ((p2-1)->c_func != 0) {
+			  (p2-1)->c_func = p2->c_func;
+			  (p2-1)->c_arg = p2->c_arg;
+			  (p2-1)->c_tim = p2->c_tim;
+			  ++p2;
+		  }
+	  }
+
+	  return;
+  }
+#+END_SRC
+
+On n'a pas besoin de masquer des interruptions, parce qu'on est déjà dans une interruption horloge.
+
+*** Coder une fonction noyau sleep qui ne servirait que de delay
+
+On a bien compris ce que delay faisait : il demande à être réveillé dans ticks ticks et s'endort.
+
+#+BEGIN_SRC c
+  sleep()
+  {
+	  int sec = u.u_args[0];
+	  int ticks = sec * HZ;
+	  int expected_date = time + sec;
+	  delay(ticks);
+
+	  if (time < expected_date) {
+		  u.u_ar0[R0].expected_date - time;
+	  } else {
+		  u.u_ar0[R0] = 0;
+	  }
+  }
+#+END_SRC
+
+*** Question type examen
+
+Implémenter untimeout(ident)
+
+#+BEGIN_SRC c
+  untimeout(int ident)
+  {
+	  struct callo *p1;
+	  struct callo *p2;
+
+	  p1 = &callout[O];
+
+	  while (p1->c_func != 0) {
+		  if (p1->c_ident == ident) {
+			  p2 = p1 + 1;
+			  p2 ->c_time += p1->c_time;
+
+			  while ((p2-1)->c_func != 0) {
+				  (p2-1)->c_func = p2->c_func;
+				  (p2-1)->c_arg = p2->c_arg;
+				  (p2-1)->c_ident = p2->c_ident;
+				  (p2-1)->c_time = p2->c_time;
+				  ++p2;
+			  }
+		  }
+		  ++p1;
+	  }
+  }
+#+END_SRC
+
+
 * Annexes
 
 Les supports de TD :
