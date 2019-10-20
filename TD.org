@@ -845,19 +845,20 @@ L'interruption horloge, ou plutôt sa gestion, est écrite dans le fichier clock
 
 #+BEGIN_QUOTE
 clock is called straight from real time clock interrupt.
+
+Code source de Unix v6
 #+END_QUOTE
 
-La structure callo dans la fichier d'en-tête callo, permet de créer des appels réguliers.
+La structure callo dans la fichier d'en-tête callo.h, permet de créer des appels réguliers.
 
-On a un tableau statique de cette structure.
+On a un tableau statique de cette structure de taille NCALL, défini par une macro à la compilation.
 
-Un define de l'inhibition d'horloge.
+On a dans le fichier param.h un define de l'inhibition des interruptions horloge.
 
 Dans la structure proc, p_time, p_clktime, p_cpu.
-p_time définit le temps pendant lequel on a été résident à un endroit précis en mémoire ou dans le swap (remis à 0 dès qu'on est swappé ou déswappé, mais incrémenté tout le temps)
-
-On a SIGALRM
-
+p_time définit le temps pendant lequel on a été résident à un endroit précis en mémoire ou dans le swap (remis à 0 dès qu'on est swappé ou déswappé, mais incrémenté tout le temps).
+p_clktime donne le temps avant l'alarme.
+p_cpu donne l'utilisation du cpu.
 
 On a une fonction accessible à l'utilisateur, time(2), définie comme suit.
 
@@ -867,16 +868,13 @@ On a une fonction accessible à l'utilisateur, time(2), définie comme suit.
   time_t time(time_t *tloc);
 #+END_SRC
 
-*** Question 1
+*** Question 1 : analyse des fonctions
 
-Celle-ci fait appel au temps global, soit le nombre de secondes depuis 1/1/1970
-
-
-
+La variable globale time fait appel au temps global, soit le nombre de secondes depuis 1/1/1970
 
 **** clock()
 
-On créé deux entiers externes (que signifie ce mot-clé ??).
+On créé deux entiers externes (on fait appel à des variables déjà définies ailleurs).
 
 Un pointeur vers une structure callo, dans un registre.
 
@@ -885,13 +883,10 @@ Un pointeur vers un entier, dans le registre.
 On regarde le premier élément du tableau des callouts.
 
 On parcourt le tableau des callouts :
-Si c_time est inférieur à 0 et 
-
-
-
+Si c_time est inférieur à 0 et qu'il n'y a pas de fonction dans le champ c_func, on passe à l'élément suivant.
+Sinon on décrémente le champ c_time et on sort de suite (plus de précisions dans l'explication de l'algorithme de callo)
 
 idleflag est à 1 signifie qu'il n'y a aucun processus à élire.
-
 Si l'usage du cpu d'un processus est en-dessous de 80, on incrémente cet usage.
 L'usage du cpu est borné à 80.
 
@@ -918,7 +913,7 @@ On réveille tout le monde à l'adresse lbolt (Quelqu'un qui veut être réveill
 
 On parcourt la table des processus.
 
-Si il y a bien un processus, on incrémente le resident time jusqu'à 127.
+Si il y a bien un processus, on incrémente le resident time jusqu'à une limite de 127.
 
 Si le temps jusqu'au prochain signal SIGALRM est 0, on traite le signal SIGALRM.
 
@@ -932,13 +927,13 @@ Si le temps jusqu'au prochain signal SIGALRM est 0, on traite le signal SIGALRM.
 
 On divise le cpu usage par 2 : On applique le decay de l'algorithme d'ordonnancement de UNIX.
 
-Si le processus a une prio faible, on remet à jour sa priorité selon l'algorithme unix, en appelant setpri
+Si le processus a une prio faible, on remet à jour sa priorité selon l'algorithme unix, en appelant setpri.
 
-Ensuite, si pression mémoire, on réveille le swapper.
+Ensuite, si pression mémoire (testée par runin), on réveille le swapper.
 
 **** setpri
 
-En gros applique l'algorithme vu en cours, pour recréer un système de round robin.
+En gros applique l'algorithme vu en cours, pour recréer un système de round robin sans queue.
 
 *** Question 2
 
@@ -960,7 +955,17 @@ On parcourt la table callout.
 
 Si on a bien une fonction dans la structure callo courante, et que le temps incrémentiel est en-dessous de t le temps passé en paramètre.
 
-**** Petit exercice
+On applique l'algorithme décrit plus bas dans l'exercice.
+
+En fait, l'idée est de ne noter que les temps cumulés à la prochaine fonction : il faut donc, lorsqu'on rajoute une fonction à exécuter plus tard, descendre dans le tableau en comparant aux temps de la fonction dans le tableau. Si c'est inférieur, c'est qu'on a trouvé notre place, auquel cas on shift tout le monde vers le bas. Si c'est supérieur, on décrémente le temps de la fonction à ajouter, et on compare au prochain élément.
+
+De cette manière, lors d'une interruption horloge, on peut se contenter de ne décrémenter que le champ time du premier élément, ce qui mettra à jour tous les éléments du tableau :
+
+#+BEGIN_QUOTE
+The time in each structure entry is the number of HZ's more than the previous entry. In this way, decrementing the first entry has the effect of updating all entries
+#+END_QUOTE
+
+**** Petit exercice d'entraînement
 
 On applique timeout(f, arg_f, 11) et timeout(g, arg_g, 5)
 
@@ -990,8 +995,8 @@ Tout est vide
 
 | i | func | arg   | time |
 |---+------+-------+------|
-| 0 |    f | arg_f |   10 |
-| 1 |    0 | '\0'  |  -10 |
+| 0 |    f | arg_f |   11 |
+| 1 |    0 | '\0'  |  -11 |
 | 2 |    0 |       |      |
 | 3 |    0 |       |      |
 | 4 |    0 |       |      |
@@ -1002,9 +1007,9 @@ Tout est vide
 
 | i | func | arg   | time |
 |---+------+-------+------|
-| 0 |    g | arg_g |    4 |
-| 1 |    f | arg_f |    5 |
-| 2 |    0 | '\0'  |  -10 |
+| 0 |    g | arg_g |    5 |
+| 1 |    f | arg_f |    6 |
+| 2 |    0 | '\0'  |  -11 |
 | 3 |    0 |       |      |
 | 4 |    0 |       |      |
 | 5 |    0 |       |      |
@@ -1012,7 +1017,65 @@ Tout est vide
 | 7 |    0 |       |      |
 | 8 |    0 |       |      |
 
-[fait au tableau, à refaire]
+| i | func | arg   | time |
+|---+------+-------+------|
+| 0 |    g | arg_g |    4 |
+| 1 |    f | arg_f |    6 |
+| 2 |    0 | '\0'  |  -11 |
+| 3 |    0 |       |      |
+| 4 |    0 |       |      |
+| 5 |    0 |       |      |
+| 6 |    0 |       |      |
+| 7 |    0 |       |      |
+| 8 |    0 |       |      |
+
+| i | func | arg   | time |
+|---+------+-------+------|
+| 0 |    g | arg_g |    3 |
+| 1 |    f | arg_f |    6 |
+| 2 |    0 | '\0'  |  -11 |
+| 3 |    0 |       |      |
+| 4 |    0 |       |      |
+| 5 |    0 |       |      |
+| 6 |    0 |       |      |
+| 7 |    0 |       |      |
+| 8 |    0 |       |      |
+
+| i | func | arg   | time |
+|---+------+-------+------|
+| 0 |    g | arg_g |    3 |
+| 1 |    h | arg_h |    0 |
+| 2 |    f | arg_f |    6 |
+| 3 |    0 | '\0'  |  -11 |
+| 4 |    0 |       |      |
+| 5 |    0 |       |      |
+| 6 |    0 |       |      |
+| 7 |    0 |       |      |
+| 8 |    0 |       |      |
+
+| i | func | arg   | time |
+|---+------+-------+------|
+| 0 |    g | arg_g |    2 |
+| 1 |    h | arg_h |    0 |
+| 2 |    f | arg_f |    6 |
+| 3 |    0 | '\0'  |  -11 |
+| 4 |    0 |       |      |
+| 5 |    0 |       |      |
+| 6 |    0 |       |      |
+| 7 |    0 |       |      |
+| 8 |    0 |       |      |
+
+| i | func | arg   | time |
+|---+------+-------+------|
+| 0 |    g | arg_g |    2 |
+| 1 |    h | arg_h |    0 |
+| 2 |    f | arg_f |    6 |
+| 3 |    i | arg_i |    0 |
+| 4 |    0 | '\0'  |  -11 |
+| 5 |    0 |       |      |
+| 6 |    0 |       |      |
+| 7 |    0 |       |      |
+| 8 |    0 |       |      |
 
 *** Rappel
 
@@ -1051,7 +1114,7 @@ A chaque interruption d'horloge :
 
 On n'a pas besoin de masquer des interruptions, parce qu'on est déjà dans une interruption horloge.
 
-*** Coder une fonction noyau sleep qui ne servirait que de delay
+*** Coder une fonction noyau sleep qui ne se servirait que de delay
 
 On a bien compris ce que delay faisait : il demande à être réveillé dans ticks ticks et s'endort.
 
