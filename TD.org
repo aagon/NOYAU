@@ -1165,11 +1165,181 @@ Implémenter untimeout(ident)
 #+END_SRC
 
 
+* TD 5 : 23/10/2019
+
+On va parler aujourd'hui du mécanisme de commutation.
+
+Comment faire pour passer d'un processus à un autre.
+
+La commutation, c'est le mécanisme du noyau qui permet le partage du temps processeur entre les processus (temps partagé).
+
+*** Rappels de l'automate d'état
+
+Un processus passe du mode élu S au mode prêt quand il a incrémenté runrun et qu'il perd l'élection.
+
+Un processus passe du mode élu S au mode bloqué avec sleep().
+
+Un processus passe du mode élu U au mode zombie avec exit().
+
+*** La commutation
+
+#+BEGIN_THEOREM
+*Un processeur (ses registres visibles du processeur) ne connaît pas les adresses physiques*, mais seulement des adresses virtuelles.
+#+END_THEOREM
+
+Le compteur ordinal, en particulier, ne connaît que des adresses virtuelles.
+
+Du point de vue du processeur, la mémoire ressemble à ça :
+
+|---------|
+| Zone U  |
+|---------|
+| OS      |
+|---------|
+| Pile U  |
+|---------|
+| Données |
+|---------|
+| Code    |
+|---------|
+
+Chacune des zones est mappée vers une zone de mémoire physique (la correspondance est dans la table des pages).
+La zone OS est toujours mappée au même endroit (elle ne bouge pas dans la mémoire physique, et elle n'est jamais swappée).
+
+On a un registre qui donne l'adresse *physique* de la table des pages (les registres systèmes ont le droit de stocker directement des adresses physiques).
+
+p_addr est l'adresse physique de la zone mémoire du processus.
+
+
+La commutation consiste donc en :
+- Changer la traduction virtuelle-physique (opération de pointeur simple, peu coûteux)
+- Changer le pointeur de pile (registres visibles de l'utilisateur)
+
+On part du principe que tout processus qui est potentiellement élu avait appelé switch avant de perdre le processeur. Donc en fait, quand je change la table des pages et le pointeur de pile, en fait je sors de la fonction *pile au bon endroit* : la valeur à mettre dans le compteur ordinal, qu'on trouve en pointe de pile pour être retrouvée à chaque sortie de fonction, est déjà la bonne puisque c'est celle qu'on avait mis à l'appel de switch au temps jadis.
+
+Le pointeur d'instruction reste donc le même (il doit bien exécuter le reste de la fonction switch), mais on sait qu'on retrouvera le bon.
+
+#+BEGIN_THEOREM
+Deux adresses physiques contigües en nombre ne sont pas forcément contigües en matériel
+#+END_THEOREM
+
+
+
+Segments :
+- Code
+- Pile U
+- Zone U (pile S plus struct u)
+- Données (tas et variables globales)
+
+Puis, ailleurs, dans la zone système de la mémoire :
+- Code de l'OS
+- Données de l'OS, variables globales
+- Structures de données pour l'OS.
+
+La fonction retu :
+Prend en paramètre l'adresse physique de la mémoire des processus
+Remplace la table des pages courante par la table des pages adressée physiquement par le paramètre.
+
+
+
+
+Fichier text.h
+
+x_daddr : l'adresse du bloc disque.
+x_caddr : l'adresse du segment mémoire du texte.
+
+x_count : nombre de références totales [quand c'est 0, on sait qu'on peut flush].
+x_ccount : nombre de références par des processus chargés [quand c'est 0, on sait qu'on peut swap : on ramènera du disque en même temps que le processus qu'on ramènera].
+
+*** Question 3
+
+Analyse de swtch()
+
+On déclare un pointeur (static : enregistré dans le segment de données, mais reste visible uniquement par la fonction) vers une structure proc.
+Deux entiers (dans le registre)
+Un pointeur vers une structure proc (dans le registre)
+
+On fait pointer p vers le premier élément du tableau (la struct proc du processus 0, le scheduler) : 
+
+On met des registres processeur (le stack pointer) dans la structure u du processus qui a appelé swtch.
+
+savu sauvegarde le SP dans la structure passée en paramètre.
+
+On charge dans les registres du processeur les registres sauvegardés en mémoire du scheduler (le processus 0) : u a changé.
+
+aretu permet de changer le stack pointer sans commuter (retu en un peu moins puissant).
+
+On a un label de loop :
+runrun est remis à 0
+On fait pointer rp vers p, p vers NULL, et n vers 128 ().
+
+On se rappelle du p du précédent appel à la fonction, parce qu'on veut recommencer à ce p (pas du début).
+
+On fait compare les priorités, et on garde un pointeur vers le plus prioritaire.
+
+Quand on sort de la boucle après avoir décrémenté i NPROC fois, on a un pointeur p vers la processus à élire.
+
+Est-ce que le processus considéré est à l'état prêt, et est-ce qu'il est en mémoire.
+
+Si j'ai trouvé aucun processus p, alors p est resté à NULL.
+Je remets p à rp, j'attends la prochaine interruption, et je réessaye.
+
+
+Si j'en ai un, j'alias son pointeur statique dans rp.
+
+Je charge le registre qui donne l'adresse de sa table des pages.
+
+sureg() : en fait, retu ne fait que changer la zone U, sureg() change les autres segments genre la pile U, les données et le code. On n'a pas fait sureg à l'entrée dans le processus 0 car ce processus n'a pas de pile, ni de code, ni de données (il écrit dans la pile du noyau, il manipule des données globales du noyau, et son code est celui du noyau)
+
+ligne 69-72 : réponse dans deux épisodes.
+
+return(1) : Si jamais le processus que j'ai élu, c'est la première fois qu'il est là (via un fork). Permet de dire vrai. [en vrai, on verra ça dans 2 séances].
+
+*** Passage mode U - mode S (et vice versa)
+
+Une trappe : Fonction appelée quand on passe du mode U au mode S.
+
+*** Question 5
+
+Appel système (la fonction utilisateur) doit renseigner :
+- La fonction système qu'on veut exécuter (en fait le numéro de l'appel système dans un registre)
+- On met les arguments à passer à la fonction système dans un tableau (et on met l'adresse dans un registre)
+- On appelle la fonction trap() : défini au niveau du matériel (changement de contexte, sp dans la zone U), on passe en mode S (on change la valeur d'un processus), déroutement vers l'appel système
+
+- On sauvegarde les registres utilisateurs dans u.u_ar0
+- On va chercher les arguments et on les met dans u.u_arg
+- Réinitialiser le u_error
+- savu(u.u_qsav) : on garde un SP vers là où on est dans la fonction trap
+- On appelle la fonction noyau
+
+A la sortie de la fonction noyau :
+
+- Checker runrun, swtch() le cas échéant
+- Checker les signaux, psig() le cas échéant
+- Copier u.u_error dans errno
+
+- On restaure les registres qu'on a sauvegardés avant de passer en mode S.
+
+On revient en mode U (PC vers code U).
+
+L'interruption, ce sera un sous-ensemble :
+- TRAP : changement de contexte, déroutement
+- Sauvegarde des registres utilisateurs
+- Exécution "handler" interruption
+- Vérification runrun
+- Vérification signaux
+- Restauration des registres utilisateurs
+
+#+BEGIN_THEOREM
+Quand on réveillé par un signal, on sort du mode noyau : on dépile toute la pile S jusqu'à TRAP, et on sort de TRAP
+#+END_THEOREM
+
+Dans les structures rsav, ssav, qsav sont enregistrés des SP qui correspondent à des états différents.
+
 * Annexes
 
 Les supports de TD :
 
 [[./TDTME.pdf][TD]]
-
 
 

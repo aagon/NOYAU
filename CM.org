@@ -364,6 +364,115 @@ Le fil d'exécution (thread) habite dans un espace d'adressage. On voit immédia
 #+END_DEFINITION
 
 
+* Cours 6 : 21/10/2019
+
+** Gestion des processus, ordonnancement, préemption
+
+Dans linux (post 2.6), on ne fait plus la distinction pour proc et user, qui venait des pressions mémoires.
+
+Tout est dans la structure task, union des deux précédentes.
+
+Dans la structure task, on trouvera :
+- La politique d'ordonnancement (OTHER pour les processus normaux, espèce de round robin avec vieillissement, FIFO réservé au temps réel, RR sans vieillissement) : spécifié par la norme POSIX
+- Leur état dans l'automate
+- priority : priorité de base
+- counter : remplace p_cpu (à ceci près que ça compte le nombre de ticks restants avant la prochaine commu)
+- contexte mémoire
+- Descripteurs de fichiers
+
+Threads sont les unités considérées par l'ordonnanceur, qui partagent la même espace d'adressage (la structure mm, pour memory management, qui contient entre autres la table des pages).
+
+C'est le déchargement/chargement de la table des pages qui coûte cher dans la commutation -> et en plus invalidation des caches.
+
+Trois classes de processus dans les linux récents :
+- Interactifs (OTHER)
+- Batch (FIFO)
+- Temps-réel (RR)
+
+Jusqu'en 2.4, linux restait non-préemptif : on avait deux classes d'ordonnancements :
+- statique sans vieillissement (pour les processus prioritaires, RR)
+- dynamique, selon l'algorithme proche du unix avec decay.
+
+[Bien revoir la correspondance entre stratégies d'ordonnancement et les classes de processus, au fil du temps]
+
+*** Algo de epoch (pour OTHER)
+
+[diapo 63]
+
+*** Schedule()
+
+En cas de blocage, ou bien au retour en mode U si un flag (runrun) est mis.
+
+Choisit le meilleur candidat, selon le concept de poids :
+- Poids = 1000 + priorité base pour SCHED_RR
+- Poids = counter + priorité de base pour SCHED_OTHER
+- Poids = 0 si counter = 0
+
+Si tous les prêts ont un poids de 0, on est à la fin de la période.
+
+Tous les processus voient leurs counter initialisés.
+counter = counter/2 + priority
+
+fork() divise le temps du père à égalité entre le père et le fils.
+
+L'idée est de connaître exactement la taille d'une époque au début de celle-ci.
+
+*** SMP
+
+Une espèce d'ordonnanceur plus compliqué, pour la prise en compte des processeurs multiples à cache séparé : fondamentalement, il est moins coûteux de garder un processus sur le même processus, ça évite d'avoir à invalider les caches.
+
+Comment changer l'algo de manière à privilégier le fait de laisser les processus plutôt sur les mêmes processeurs, et faire varier ce privilège en fonction de la taille des caches ? [réponse en M2]
+
+*** Ordonnancement 2.6
+
+Tic plus bas, alarmes plus précises.
+
+On a deux grandes classes de processus
+- Processus avec beaucoup d'E/S
+- Processus calcul
+
+Système de bonus/malus en fonction du temps qu'on est passé endormi pour des entrées/sorties.
+
+*** Linux préemptif
+
+On attend le point stable du noyau (preempt_count == 0) pour retourner en mode noyau.
+
+La variable preempt_count est incrémentée avec la prise des verrous et décrémentée avec leur libération.
+
+runrun s'appelle maintenant need_resched (booléen).
+
+On a des vérifications régulières de need_resched (points de réquisition).
+
+Ordonnancement préemptif : temps partagé (par opposition au mode batch)
+Diffère de noyau préemptif, qui signifie qu'on peut avoir une commutation avant une fin de quantum.
+
+*** Completely Fair Scheduler
+
+Temps virtuel d'exécution :
+Temps d'exécution qu'elles ont consommé lors de leur dernière exécution.
+Avantage mécaniquement les processus qui font beaucoup d'entrées-sorties.
+
+Arbre rouge-noir est un bon compromis entre rapidité et gestion de la dynamicité : la structure dépend de l'ordre d'insertion.
+
+Apparemment, le stockage des pages mémoire est aussi implémentée via des arbres rouge-noirs.
+
+La mise à jour du virtual runtime requiert de bouger une feuille dans un arbre rouge-noir :
+2log(n) soit O(log(n)).
+
+
+** Les entrées-sorties
+
+*** Le cache tampon
+
+Chaque fois qu'on fait read ou write, le bloc dans lequel se trouve l'octet qui intéresse est copié dans une zone noyau de la mémoire centrale, appelée le cache tampon.
+
+En fait, le processeur ne connaît pas directement le disque.
+
+Le cache tampon est bien évidemment dans la partie noyau de la mémoire centrale.
+
+La structure buf est en fait une table de hash.
+
+
 * Annexes
 
 Support de cours :

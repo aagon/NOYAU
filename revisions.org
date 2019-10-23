@@ -1,0 +1,159 @@
+#+TITLE : Révisions TD 4I401 NOYAU
+#+PROPERTY: header-args :mkdirp yes
+#+STARTUP: inlineimages
+
+* Intro
+
+* Annale 2018
+
+** Exo 1
+
+*** Question 1
+
+Pourquoi doit-on interdire la redéfinition du comportement du signal SIGKIL ?
+
+On ne doit pas être capable de redéfinir SIGKILL et SIGSTOP car ce sont les seules manières externes d'arrêter 
+
+On doit toujours pouvoir tuer un processus.
+
+*** Question 2
+
+Ignoré : On ne tient pas compte du signal, on ne le traitera jamais
+Masqué : retarde son traitement
+
+*** Question 3
+
+[à faire au tableau]
+
+*** Question 4
+
+[à faire au tableau]
+
+** Exo 2
+
+*** Question 1
+
+#+BEGIN_SRC c
+  wait_N(void *ad)
+  {
+	
+  }
+#+END_SRC
+
+
+** Exo 3
+
+*** Question 1
+
+PSESSION est inférieur à PZERO, on aura donc tous les processus endormis avec nos nouvelles fonctions non interruptibles par des signaux.
+
+[On s'est trompé. Le fucking tableau de la page 29 est dans le mauvais sens]a
+
+*** Question 2
+
+#+BEGIN_SRC c
+  sys_stop_session()
+  {
+	  sleep_session_soft();
+	  u.u_ar0[R0] = 1;
+  }
+#+END_SRC
+
+*** Question 3
+
+#+BEGIN_SRC c
+  sys_continue_session()
+  {
+	  short *ttyp = u.u_arg[0];
+	  int n = wakeup_session(ttyp);
+
+	  if (*ttyp == 0) u.u_error = ECONT;
+
+	  u.u_ar0[R0] = n;
+
+	  return;
+  }
+#+END_SRC
+
+
+*** Question 4
+
+struct user signifie swappable : or on veut accéder à sleep_session depuis un autre processus, on ne doit pas permettre à ce champ d'être swappé.
+Donc on le met dans la struct proc.
+
+On veut juste savoir si ça a été endormi en session ou non, alors que wchan enregistre une adresse.
+
+*** Question 5
+
+#+BEGIN_SRC c
+  wakeup_session(short *ttyd)
+  {
+	  register struct proc *p = &proc[0];
+	  int nb = 0;
+
+	  for (; p != &proc[NPROC]; ++p) {
+		  if ((p->p_stat == SSLEEP) &&
+		      (p->p_sleep_session == 1) &&
+		      (p->p_ttyp == ttyd)) {
+			  setrun(p);
+			  nb++;
+		  }
+	  }
+
+	  return nb;
+  }
+#+END_SRC
+
+Réveiller un processus en particulier : setrun (pas wakeup, qui réveille tous les processus sur une condition)
+
+*** Question 6
+
+#+BEGIN_SRC c
+  void sleep_session_soft()
+  {
+	  register struct proc *p = &proc[0];
+	  short *ttyd = u->u_procp->p_ttyp;
+	  int old_mask = gpl();
+
+	  spl(CLINHB);
+	  for (; p != &proc[NPROC]; ++p) {
+		  if ((p->p_stat == SRUN) &&
+		      (p->ttyp == ttyd)) {
+			  p->p_stat = SSLEEP;
+			  p->p_wchan = ttyd;
+			  p->p_pri = PSESSION;
+			  p->p_sleep_session = 1;
+		  }
+	  }
+	  spl(old_mask);
+
+	  swtch();
+  }
+#+END_SRC
+
+*** Question 7
+
+#+BEGIN_SRC c
+  void sleep_session_hard()
+  {
+	  register struct proc *p = &proc[0];
+	  short *ttyd = u->u_procp->p_ttyp;
+	  int old_mask = gpl();
+
+	  spl(CLINHB);
+	  for (; p != &proc[NPROC]; ++p) {
+		  if ((p->p_stat != 0) &&
+		      (p->ttyp == ttyd)) {
+			  p->p_stat = SSLEEP;
+			  p->p_wchan = ttyd;
+			  p->p_pri = PSESSION;
+			  p->p_sleep_session = 1;
+		  }
+	  }
+
+	  spl(old_mask);
+	  swtch();
+  }
+#+END_SRC
+
+
