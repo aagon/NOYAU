@@ -368,54 +368,73 @@ Le fil d'exécution (thread) habite dans un espace d'adressage. On voit immédia
 
 ** Gestion des processus, ordonnancement, préemption
 
-Dans linux (post 2.6), on ne fait plus la distinction pour proc et user, qui venait des pressions mémoires.
+Dans linux (post 2.6), on ne fait plus la distinction entre proc et user, distinction qui venait des pressions mémoires.
 
 Tout est dans la structure task, union des deux précédentes.
 
 Dans la structure task, on trouvera :
-- La politique d'ordonnancement (OTHER pour les processus normaux, espèce de round robin avec vieillissement, FIFO réservé au temps réel, RR sans vieillissement) : spécifié par la norme POSIX
+- La politique d'ordonnancement (OTHER pour les processus normaux, anciennement une espèce de round robin avec vieillissement (cf. unix et son algo de decay), mais maintenant selon le CFS, FIFO réservé pour les tâches temps réel en mode batch , RR sans vieillissement pour les tâches en temps réel partagé) : spécifié par la norme POSIX.
 - Leur état dans l'automate
 - priority : priorité de base
 - counter : remplace p_cpu (à ceci près que ça compte le nombre de ticks restants avant la prochaine commu)
 - contexte mémoire
-- Descripteurs de fichiers
+- descripteurs de fichiers ouverts
 
-Threads sont les unités considérées par l'ordonnanceur, qui partagent la même espace d'adressage (la structure mm, pour memory management, qui contient entre autres la table des pages).
+L'ordonnanceur considère des threads (pas des processus : on dira processus dans la suite, par abus de langage), qui partagent la même espace d'adressage (la structure mm, pour memory management, qui contient entre autres la table des pages).
 
 C'est le déchargement/chargement de la table des pages qui coûte cher dans la commutation -> et en plus invalidation des caches.
 
 Trois classes de processus dans les linux récents :
-- Interactifs (OTHER)
-- Batch (FIFO)
-- Temps-réel (RR)
+- Interactifs : peu prioritaires, peu coûteux en CPU, mais ont tendance à faire beaucoup d'entrées-sorties. Les processus de l'utilisateur sont de ce type. (Ces processus suivent en général la politique d'ordonnancement SCHED_OTHER)
+- Batch (peut être utilisé pour le temps réel, mais ne peut être préempté que par un processus de priorité plus grande que lui) : Ce sont des tâches qui ne se font pas en temps partagé : une fois qu'elles ont commencé, elles vont jusqu'au bout (en général, batch veut dire sans temps partagé) (Ces processus suivent la politique d'ordonnancement SCHED_FIFO)
+- Temps-réel mais avec partage de temps, sans decay (Ces processus suivent la politique SCHED_RR) 
+
+#+BEGIN_QUOTE
+SCHED_FIFO is a simple scheduling algorithm without time slicing.
+
+Man page, sched(7)
+#+END_QUOTE
+
+#+BEGIN_QUOTE
+SCHED_RR: Round-robin scheduling
+
+SCHED_RR is a simple enhancement of SCHED_FIFO. Everything described above for SCHED_FIFO also applies to
+SCHED_RR, except that each thread is allowed to run only for a maximum time quantum. If a SCHED_RR thread
+has been running for a time period equal to or longer than the time quantum, it will be put at the end of
+the list for its priority. A SCHED_RR thread that has been preempted by a higher priority thread and subse‐
+quently resumes execution as a running thread will complete the unexpired portion of its round-robin time
+quantum. The length of the time quantum can be retrieved using sched_rr_get_interval(2).
+
+Suite de la man page, sched(7)
+#+END_QUOTE
 
 Jusqu'en 2.4, linux restait non-préemptif : on avait deux classes d'ordonnancements :
-- statique sans vieillissement (pour les processus prioritaires, RR)
+- statique sans vieillissement (pour les processus temps réel, priorité choisie par l'utilisateur, RR)
 - dynamique, selon l'algorithme proche du unix avec decay.
-
-[Bien revoir la correspondance entre stratégies d'ordonnancement et les classes de processus, au fil du temps]
 
 *** Algo de epoch (pour OTHER)
 
-[diapo 63]
+[[./CM1/epoch.jpg][Algorithme de epoch]]
 
 *** Schedule()
 
-En cas de blocage, ou bien au retour en mode U si un flag (runrun) est mis.
+Appelée en cas de blocage du processus courant, ou bien au retour en mode U si un flag (runrun) est mis.
 
 Choisit le meilleur candidat, selon le concept de poids :
 - Poids = 1000 + priorité base pour SCHED_RR
 - Poids = counter + priorité de base pour SCHED_OTHER
 - Poids = 0 si counter = 0
 
-Si tous les prêts ont un poids de 0, on est à la fin de la période.
+Si tous les processus prêts ont un poids de 0, on est à la fin de la période.
 
 Tous les processus voient leurs counter initialisés.
 counter = counter/2 + priority
 
 fork() divise le temps du père à égalité entre le père et le fils.
 
-L'idée est de connaître exactement la taille d'une époque au début de celle-ci.
+L'idée est de connaître exactement la taille maximale d'une époque au début de celle-ci : on aura beau créer autant de processus qu'on veut, la taille de l'époque ne saurait dépasser la taille maximale qu'on pouvait calculer au début de celle-ci.
+
+On sait surtout que tous les processus prêts se verront donner du temps avant la fin de l'époque.
 
 *** SMP
 
@@ -425,13 +444,15 @@ Comment changer l'algo de manière à privilégier le fait de laisser les proces
 
 *** Ordonnancement 2.6
 
-Tic plus bas, alarmes plus précises.
+Tic (jiffy) plus bas, alarmes plus précises.
 
 On a deux grandes classes de processus
 - Processus avec beaucoup d'E/S
 - Processus calcul
 
 Système de bonus/malus en fonction du temps qu'on est passé endormi pour des entrées/sorties.
+
+Pour ça, dans la structure task, on ajoute un champ.
 
 *** Linux préemptif
 
