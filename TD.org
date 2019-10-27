@@ -1169,7 +1169,7 @@ Implémenter untimeout(ident)
 
 On va parler aujourd'hui du mécanisme de commutation.
 
-Comment faire pour passer d'un processus à un autre.
+Comment faire pour passer d'un processus à un autre ?
 
 La commutation, c'est le mécanisme du noyau qui permet le partage du temps processeur entre les processus (temps partagé).
 
@@ -1185,6 +1185,8 @@ Un processus passe du mode élu U au mode zombie avec exit().
 
 #+BEGIN_THEOREM
 *Un processeur (ses registres visibles du processeur) ne connaît pas les adresses physiques*, mais seulement des adresses virtuelles.
+
+Il existe certains registres (très peu) qui doivent connaître des adresses physiques.
 #+END_THEOREM
 
 Le compteur ordinal, en particulier, ne connaît que des adresses virtuelles.
@@ -1204,7 +1206,7 @@ Du point de vue du processeur, la mémoire ressemble à ça :
 |---------|
 
 Chacune des zones est mappée vers une zone de mémoire physique (la correspondance est dans la table des pages).
-La zone OS est toujours mappée au même endroit (elle ne bouge pas dans la mémoire physique, et elle n'est jamais swappée).
+La zone OS est toujours mappée vers le même endroit (elle ne bouge pas dans la mémoire physique, et elle n'est jamais swappée).
 
 On a un registre qui donne l'adresse *physique* de la table des pages (les registres systèmes ont le droit de stocker directement des adresses physiques).
 
@@ -1223,9 +1225,7 @@ Le pointeur d'instruction reste donc le même (il doit bien exécuter le reste d
 Deux adresses physiques contigües en nombre ne sont pas forcément contigües en matériel
 #+END_THEOREM
 
-
-
-Segments :
+Segments mémoire d'un processus :
 - Code
 - Pile U
 - Zone U (pile S plus struct u)
@@ -1237,31 +1237,29 @@ Puis, ailleurs, dans la zone système de la mémoire :
 - Structures de données pour l'OS.
 
 La fonction retu :
-Prend en paramètre l'adresse physique de la mémoire des processus
-Remplace la table des pages courante par la table des pages adressée physiquement par le paramètre.
+Prend en paramètre l'adresse physique de la mémoire des processus.
+Remplace la table des pages courante par la table des pages adressée physiquement par le paramètre (en vrai, uniquement la partie de la table des pages qui mappe les adresses virtuelles de la zone U vers les adresses physiques. Le reste du travail est fait par une autre fonction, sureg())
 
-
-
-
-Fichier text.h
+**** Fichier text.h
 
 x_daddr : l'adresse du bloc disque.
 x_caddr : l'adresse du segment mémoire du texte.
 
-x_count : nombre de références totales [quand c'est 0, on sait qu'on peut flush].
-x_ccount : nombre de références par des processus chargés [quand c'est 0, on sait qu'on peut swap : on ramènera du disque en même temps que le processus qu'on ramènera].
+x_count : nombre de références totales (quand c'est 0, on sait qu'on peut flush).
+x_ccount : nombre de références par des processus chargés (quand c'est 0, on sait qu'on peut swap : on ramènera du disque en même temps que le processus qu'on ramènera).
 
 *** Question 3
 
-Analyse de swtch()
+**** Analyse de swtch()
 
-On déclare un pointeur (static : enregistré dans le segment de données, mais reste visible uniquement par la fonction) vers une structure proc.
-Deux entiers (dans le registre)
-Un pointeur vers une structure proc (dans le registre)
+On déclare un pointeur (static : enregistré dans le segment de données plutôt que dans la pile, survit donc à la fonction, mais reste visible uniquement par celle-ci) vers une structure proc.
+Deux entiers (dans le registre).
+Un pointeur vers une structure proc (dans le registre).
 
-On fait pointer p vers le premier élément du tableau (la struct proc du processus 0, le scheduler) : 
+Seulement si p est le pointeur NULL, on fait pointer p vers le premier élément du tableau (la struct proc du processus 0, le scheduler).
+Si p n'est pas le pointeur NULL, alors il garde la valeur qu'il avait lors du dernier appel à swtch() : c'est pour cette raison qu'on a déclaré p avec le mot-clé static. Pourquoi on fait ça ? On veut que la recherche reprenne exactement là où on l'a interrompu la dernière fois.
 
-On met des registres processeur (le stack pointer) dans la structure u du processus qui a appelé swtch.
+On met le stack pointer dans la structure u du processus qui a appelé swtch (dans le champ u_rsav, plus spécifiquement).
 
 savu sauvegarde le SP dans la structure passée en paramètre.
 
@@ -1271,19 +1269,16 @@ aretu permet de changer le stack pointer sans commuter (retu en un peu moins pui
 
 On a un label de loop :
 runrun est remis à 0
-On fait pointer rp vers p, p vers NULL, et n vers 128 ().
+On fait pointer rp vers p, p vers NULL, et n vers 128.
 
-On se rappelle du p du précédent appel à la fonction, parce qu'on veut recommencer à ce p (pas du début).
+On regarde tous les processus prêts et chargés en mémoire.
 
-On fait compare les priorités, et on garde un pointeur vers le plus prioritaire.
+On garde le plus prioritaire.
 
-Quand on sort de la boucle après avoir décrémenté i NPROC fois, on a un pointeur p vers la processus à élire.
-
-Est-ce que le processus considéré est à l'état prêt, et est-ce qu'il est en mémoire.
+Quand on sort de la boucle après avoir décrémenté i NPROC fois (on ne fait plus d'un tour complet), on a un pointeur p vers la processus à élire.
 
 Si j'ai trouvé aucun processus p, alors p est resté à NULL.
 Je remets p à rp, j'attends la prochaine interruption, et je réessaye.
-
 
 Si j'en ai un, j'alias son pointeur statique dans rp.
 
@@ -1292,12 +1287,18 @@ Je charge le registre qui donne l'adresse de sa table des pages.
 sureg() : en fait, retu ne fait que changer la zone U, sureg() change les autres segments genre la pile U, les données et le code. On n'a pas fait sureg à l'entrée dans le processus 0 car ce processus n'a pas de pile, ni de code, ni de données (il écrit dans la pile du noyau, il manipule des données globales du noyau, et son code est celui du noyau)
 
 ligne 69-72 : réponse dans deux épisodes.
+Avant-goût : On vérifie si le champ p_flag du processus sélectionné porte le flag SSWAP (est-ce que le processus est en train de se faire swapped out).
+Si oui, alors on l'enlève, et on change le stack pointer vers la valeur enregistrée dans u_ssav la dernière fois qu'on a appelé savu (on sait qu'on a appelé savu, parce qu'on part du principe que tous processus qui a existé a appelé swtch(), et que swtch() fait un appel à savu).
+
+Si on a élu un processus, c'est qu'il est chargé en mémoire. Donc ce flag SSWAP est ancien, et il doit être enlevé (d'ailleurs, on l'enlève). En fait, c'est lié au fork. Quand un processus fork, s'il n'y a pas assez de mémoire pour le nouveau processus, on peut immédiatement swap out le fils. Pendant ce swap-là, on enregistre le pointeur de pile du fils dans son u_ssav, avant de le swap out.
+
+Si ensuite par chance il s'est fait reswap in, on rétablit son pointeur de pile. (pas encore très clair)
 
 return(1) : Si jamais le processus que j'ai élu, c'est la première fois qu'il est là (via un fork). Permet de dire vrai. [en vrai, on verra ça dans 2 séances].
 
 *** Passage mode U - mode S (et vice versa)
 
-Une trappe : Fonction appelée quand on passe du mode U au mode S.
+Une trappe : Fonction appelée quand on passe du mode U au mode S. Cette fonction est définie au niveau matériel, elle est écrite par le constructeur.
 
 *** Question 5
 
@@ -1334,7 +1335,8 @@ L'interruption, ce sera un sous-ensemble :
 Quand on réveillé par un signal, on sort du mode noyau : on dépile toute la pile S jusqu'à TRAP, et on sort de TRAP
 #+END_THEOREM
 
-Dans les structures rsav, ssav, qsav sont enregistrés des SP qui correspondent à des états différents.
+Dans les structures rsav, ssav, qsav sont enregistrés des SP qui correspondent à des états différents de quand ils ont été enregistrés (ssav, on l'a déjà vu, sert à enregistrer le SP juste avant de se faire swap).
+
 
 * Annexes
 

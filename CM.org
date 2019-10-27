@@ -448,50 +448,110 @@ Tic (jiffy) plus bas, alarmes plus précises.
 
 On a deux grandes classes de processus
 - Processus avec beaucoup d'E/S
-- Processus calcul
+- Processus qui demande beaucoup de calcul
 
 Système de bonus/malus en fonction du temps qu'on est passé endormi pour des entrées/sorties.
 
-Pour ça, dans la structure task, on ajoute un champ.
+Pour ça, dans la structure task, on ajoute un champ qui donne le temps passé endormi pour des entrées/sorties.
+
+sleep_avg : augmenté à chaque réveil de processus, décrémenté à chaque tic.
+
+*** Ancien algorithme d'ordonnancement linux
+
+L'algorithme s'appelle l'algorithme O(1) parce qu'il est en O(1).
+
+On a deux vecteurs de N bits, avec N le niveau de priorité (en pratique N = 140).
+
+Le premier vecteur de bits s'occupe des processeurs prêts, et le second pour les processus expirés (qui ont épuisé leur quantum).
+
+Si il existe un processus prêt (respectivement épuisé) à la priorité i, alors le i-1 ème bit du premier (respectivement deuxième) vecteur est mis à 1.
+
+A chacun de ces vecteurs de bits correspond un vecteur de N pointeurs, pointeurs vers la tête de la liste chaînée des tâches de priorité en question. Le scheduler regarde le vecteur de bit, va chercher la première tâche de la liste chaînée. A la fin du quantum, elle est dépop de la liste et poussée dans la liste correspondante de l'autre tableau.
+
+Quand un tableau n'a plus que des pointeurs NULL (soit quand tous les processus ont épuisé leur quantum), on change les tableaux (le tableau épuisé devient le tableau prêt, et vice versa).
 
 *** Linux préemptif
 
-On attend le point stable du noyau (preempt_count == 0) pour retourner en mode noyau.
+Si un noyau est non-préemptif, alors on connaît exactement les moments où il sortira du mode S : c'est le flot de contrôle des différentes fonctions noyau écrites par le concepteur du noyau qui donneront les moments possibles de la sortie. Au concepteur du système de faire attention à ce que le noyau est stable (les variables des structures de données du noyau soient aux bonnes valeurs, et cohérentes, *entre autres choses*).
 
-La variable preempt_count est incrémentée avec la prise des verrous et décrémentée avec leur libération.
+Quand le noyau devient préemptif, cette propriété saute : on peut avoir à quitter le mode S en de multiples endroits inconnus du concepteur du système. Si par malheur on laisse le noyau dans un état instable, alors on se prendra une panique noyau à notre prochain appel système.
+
+Il faut s'assurer de ce que le noyau est stable avant de laisser le processeur au processus temps réel qui va chercher à quitter le mode noyau le plus vite possible.
+
+On cherche déjà, dans Unix v6, à ne jamais laisser le noyau instable en masquant toutes les interruptions avant de manipuler des structures noyau critiques (c'est une manière assez ancienne de prendre un verrou, dans un processus mono-thread des années 70).
+
+On va étendre cette solution : à chaque fois qu'un verrou est pris, on incrémente un compteur. La variable preempt_count est incrémentée avec la prise des verrous et décrémentée avec leur libération.
+
+On attend le point stable du noyau (preempt_count == 0) pour donner le processeur au processus temps-réel qui va chercher à quitter mode noyau.
 
 runrun s'appelle maintenant need_resched (booléen).
 
 On a des vérifications régulières de need_resched (points de réquisition).
 
-Ordonnancement préemptif : temps partagé (par opposition au mode batch)
-Diffère de noyau préemptif, qui signifie qu'on peut avoir une commutation avant une fin de quantum.
+#+BEGIN_DEFINITION
+Distinction importante !
+
+On parle *d'ordonnancement préemptif* pour dire la même chose que temps partagé. Ce mode se conçoit par opposition au mode batch, où l'ordonnanceur ne peut pas reprendre le processeur après l'avoir donné à un processus, qui doit se finir pour que l'ordonnanceur attribue à nouveau.
+
+On parle de *noyau préemptif* pour dire que non seulement on a un ordonnancement préemptif, mais aussi et surtout qu'on peut avoir un ordonnancement avant une fin de quantum.
+#+END_DEFINITION
 
 *** Completely Fair Scheduler
 
-Temps virtuel d'exécution :
-Temps d'exécution qu'elles ont consommé lors de leur dernière exécution.
+L'ordonnanceur de linux depuis 2.6.23.
+
+#+BEGIN_DEFINITION
+L'ordonnanceur calcule un *temps maximal d'exécution* pour chaque processus. On part du principe qu'un processeur idéal partagerait son temps équitablement entre tous les processus. De cette manière, le *temps maximal d'execution* est donné par le temps que le processus a attendu pour s'exécuter, divisé par le nombre total de processus.
+
+Précision importante : "attendu" signifie ici aussi bien les processus qui attendent tout en étant prêts, que les processus qui sont endormis pour une entrée-sortie, ou pour tout autre raison.
+#+END_DEFINITION
+
+#+BEGIN_DEFINITION
+On définit le temps virtuel d'exécution (en. : virtual runtime) comme le temps (en granularité ns) qui a été donné à une tâche depuis le début de son existence (plus de notion d'époque)
+#+END_DEFINITION
+
 Avantage mécaniquement les processus qui font beaucoup d'entrées-sorties.
 
-Arbre rouge-noir est un bon compromis entre rapidité et gestion de la dynamicité : la structure dépend de l'ordre d'insertion.
+Les tâches prêtes sont stockées dans un arbre rouge-noir, dont le critère de tri est le temps virtuel d'exécution.
+
+L'arbre rouge-noir garantit qu'aucun chemin vers une feuille ne soit plus de deux fois plus long (en nombre de comparaisons) qu'un chemin vers une autre.
+
+A chaque élection, l'ordonnanceur :
+
+- Prend le noeud le plus à gauche et l'enlève de l'arbre pendant son exécution.
+- Si le processus est terminé, il est enlevé du système et ne reprend pas sa place dans l'arbre.
+- Si le processus atteint son temps maximal d'exécution, son temps d'exécution virtuel est mis à jour et il est remis dans l'arbre avec sa nouvelle valeur.
+- Si le processus s'endort, on met à jour son temps d'exécution virtuel, et on le met ailleurs (on ne va pas mettre des processus bloqués dans l'arbre des processus prêts). Il reviendra avec sa valeur mise à jour quand il sera prêt à nouveau (et il sera probablement très à gauche dans l'arbre)
+
+Et on recommence.
+
+[[https://developer.ibm.com/tutorials/l-completely-fair-scheduler/][Une description de l'ordonnanceur sur le site d'IBM]]
+
+Arbre rouge-noir est un bon compromis entre rapidité et gestion de la dynamicité : On fait beaucoup de mises à jour de l'arbre, qui coûtent le prix de bouger une feuille, une opération en O(log(n)) la plupart du temps. (pour n le nombre de threads prêts).
 
 Apparemment, le stockage des pages mémoire est aussi implémentée via des arbres rouge-noirs.
 
-La mise à jour du virtual runtime requiert de bouger une feuille dans un arbre rouge-noir :
-2log(n) soit O(log(n)).
-
+Cet ordonnanceur est l'ordonnanceur par défaut des tâches de classe SCHED_OTHER des linux récents. Il a subi deux importantes mises à jour :
+- l'ordonnancement en groupe
+- La correction de l'ordonnancement pour le multicoeur (on trouvera [[http://www.ece.ubc.ca/~sasha/papers/eurosys16-final29.pdf][ici]] un article qui détaille les bugs d'ordonnancement et les fixs proposés, intégrés dans le noyau mainline en 2016)
 
 ** Les entrées-sorties
 
 *** Le cache tampon
 
-Chaque fois qu'on fait read ou write, le bloc dans lequel se trouve l'octet qui intéresse est copié dans une zone noyau de la mémoire centrale, appelée le cache tampon.
+La chose la plus importante à comprendre, c'est que le processeur n'accède jamais directement au disque.
 
-En fait, le processeur ne connaît pas directement le disque.
+Il existe, dans la mémoire centrale, une zone dont les pages sont des copies d'un certain nombre de blocs d'un disque.
 
-Le cache tampon est bien évidemment dans la partie noyau de la mémoire centrale.
+Bien entendu, cette zone en mémoire centrale est dans la partie système des espaces d'adressage des processus. En effet, si elle était dans la zone utilisateur, le système aurait du mal à contrôler l'accès des utilisateurs au système de fichier.
 
-La structure buf est en fait une table de hash.
+Cette zone s'appelle le *cache tampon* (buffer cache). A chaque fois qu'on fait read ou write, c'est l'accès à la page du cache tampon correspondant au bloc du fichier qu'on appelle qu'on demande.
+
+Si la page est présente et bien copiée et à jour (liste des conditions non exhaustives), alors on est content. Sinon, il y a ce qu'on appelle un défaut de page, qui va requérir un accès disque pour copier le bloc (ou une partie du bloc, on n'est pas sûr) dans la page.
+
+L'écriture des registres entre les registres visibles du processeur et le cache tampon en mémoire centrale, d'une part, et entre le cache tampon en mémoire centrale et le disque, d'autre part, *sont complètement asynchrones*.
+
+Dans le unix v6, le cache tampon est implémenté sous la forme d'une table de hachage, la structure statique buf, définie dans le fichier d'en-tête buf.h.
 
 
 * Annexes
