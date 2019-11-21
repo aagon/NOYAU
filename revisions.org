@@ -47,7 +47,7 @@ Masqué : retarde son traitement
 
 PSESSION est inférieur à PZERO, on aura donc tous les processus endormis avec nos nouvelles fonctions non interruptibles par des signaux.
 
-[On s'est trompé. Le fucking tableau de la page 29 est dans le mauvais sens]a
+[Ici on prendra garde au tableau de la page 29 du cours, il est dans le mauvais sens : les priorités au-dessus de PZERO sur le dessin sont en fait les priorités inférieures numériquement à PZERO]
 
 *** Question 2
 
