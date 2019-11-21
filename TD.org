@@ -1338,6 +1338,109 @@ Quand on réveillé par un signal, on sort du mode noyau : on dépile toute la p
 Dans les structures rsav, ssav, qsav sont enregistrés des SP qui correspondent à des états différents de quand ils ont été enregistrés (ssav, on l'a déjà vu, sert à enregistrer le SP juste avant de se faire swap).
 
 
+* TD 6 : 20/11/2019
+
+Petite reprise de l'épisode précédent, on a pu reprendre la fonction swtch().
+
+On traite aujourd'hui de la naissance des processus.
+
+*** Question 1
+
+#+BEGIN_SRC c
+  #include <stdio.h>
+  #include <sys/types.h>
+  #include <unistd.h>
+  #include <stdlib.h>
+  #include <sys/wait.h>
+
+  #define N 10
+
+  int main(int argc, char *argv[])
+  {
+	  int a = 10;
+
+	  for (int i = 0; i < N; ++i) {
+		  if (fork() == 0) {
+			  ++a;
+			  printf("%d\n", a);
+			  exit();
+		  }
+	  }
+
+	  for (int i = 0; i < N; ++i) {
+		  wait();
+	  }
+
+	  return 0;
+  }
+#+END_SRC
+
+Quelles sont les valeurs affichées pour chacun des processus ?
+
+11 : Chaque fils incrémente sa propre version de la variable a.
+
+*** Question 2
+
+Le mystère de swtch() et de newproc() est enfin éclairci.
+
+Le mécanisme de création des nouveaux processus détaillé.
+
+[à reprendre correctement, en bon français]
+
+[reprendre aussi le cas du swap]
+
+*** Question perso
+
+#+BEGIN_SRC c
+  wait()
+  {
+	  struct proc *p;
+	  struct u *oldu;
+	  int nfv = 0;
+	  int nfz = 0;
+	  int *status = u.u_arg[0];
+
+	  for (p = &proc[0]; p != &proc[NPROC]; p++) {
+		  if ((p.p_stat & SZOMB) &&
+		      (u.u_procp->pid == p.p_ppid)) {
+			  nfz++;
+		  }
+
+		  if ((p.p_stat & SRUN) &&
+		      (u.u_procp->pid == p.p_ppid)) {
+			  nfv++;
+		  }
+	  }
+
+	  if ((nfv == 0) && (nfz == 0)) {
+		  u.u_ar0[R0] = -1;
+		  return;
+	  }
+
+  rm:
+	  if ((nfz > 0)) {
+		  for (p = &proc[0]; p != &proc[NPROC]; p++) {
+			  if ((p.p_stat & SZOMB) &&
+			      (u.u_procp->pid == p.p_ppid)) {
+				  oldu = bread(swapdev,p->p_addr);
+				  ,*u.u_arg[0] = oldu->b_addr->u_arg[0];
+				  mfree(swapmap,1,p->p_addr);
+				  brelse(oldu);
+				  p.p_stat = NULL;
+				  u.u_ar0[R0] = p.pid;
+				  return;
+			  }
+		  }
+	  }
+
+	  sleep(u.u_procp,PWAIT);
+
+	  goto rm;
+  }
+#+END_SRC
+
+
+
 * Annexes
 
 Les supports de TD :
