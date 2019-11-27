@@ -1346,6 +1346,12 @@ On traite aujourd'hui de la naissance des processus.
 
 *** Question 1
 
+Modifier le programme pour créer N processus fils. Chaque processus doit incrémenter la variable a, afficher la nouvelle valeur et se terminer. Le processus original attend la fin des N fils puis affiche a avant de se terminer.
+
+On part du principe, même si la consigne ne le précise pas, que le père doit créer les N fils avant de les attendre. On doit avoir, à un point dans le programme, N fils existant en même temps.
+
+Notre solution :
+
 #+BEGIN_SRC c
   #include <stdio.h>
   #include <sys/types.h>
@@ -1369,6 +1375,7 @@ On traite aujourd'hui de la naissance des processus.
 
 	  for (int i = 0; i < N; ++i) {
 		  wait();
+		  printf("%d\n", a);
 	  }
 
 	  return 0;
@@ -1378,6 +1385,8 @@ On traite aujourd'hui de la naissance des processus.
 Quelles sont les valeurs affichées pour chacun des processus ?
 
 11 : Chaque fils incrémente sa propre version de la variable a.
+
+Le père affiche par contre systématiquement 10. C'est sa propre version de la variable a qu'il regarde, et celle-ci n'a été modifiée par personne.
 
 *** Question 2
 
@@ -1390,6 +1399,20 @@ Le mécanisme de création des nouveaux processus détaillé.
 [reprendre aussi le cas du swap]
 
 *** Question perso
+
+Implémenter le code de wait, selon la spécification POSIX, ou plutôt selon la simplification Lejeune de la spécification POSIX.
+
+La fonction doit :
+
+- Si le processus appelant n'a pas de fils, ni zombie ni vivant (aussi bien prêt que élu que bloqué/endormi), la fonction se termine, l'exécution n'est pas bloquante.
+- Si le processus appelant a au moins un fils zombie, indépendemment de son nombre de fils actifs, il écrit la valeur de retour de son fils (le premier dans l'ordre de la table des processus) dans le pointeur qui lui a été passé en paramètre (si aucun pointeur ne lui a été passé en paramètre, il écrit la valeur de retour du fils dans le pointeur NULL, c'est-à-dire dans le vide [à vérifier : est-ce qu'on est sûr qu'écrire dans le pointeur NULL est un comportement défini ?]), il libère le bloc dans lequel la structure u du zombie a été stockée lors du exit() du fils, il libère l'entrée correspondant à la structure p du fils, et il retourne enfin le pid du fils. Dans ce cas, la fonction se termine, l'exécution n'est pas bloquante.
+- Si le processus appelant n'a pas de fils zombie, mais au moins un fils vivant, l'exécution est bloquante : le processus appelant s'endort, jusqu'à ce que son fils devienne zombie, moment auquel il reprend l'alternative 2.
+
+Voilà notre solution : elle est a priori assurée de fonctionner (l'éventuel comportement indéfini mentionné plus haut à peu près).
+
+On n'est pas très content de parcourir deux fois la table des processus, une fois pour compter, une fois pour nettoyer.
+
+La fonction utilise un goto, *ce qui n'est pas un problème*.
 
 #+BEGIN_SRC c
   wait()
@@ -1423,7 +1446,7 @@ Le mécanisme de création des nouveaux processus détaillé.
 			  if ((p.p_stat & SZOMB) &&
 			      (u.u_procp->pid == p.p_ppid)) {
 				  oldu = bread(swapdev,p->p_addr);
-				  ,*u.u_arg[0] = oldu->b_addr->u_arg[0];
+				  ,*status = oldu->b_addr->u_arg[0];
 				  mfree(swapmap,1,p->p_addr);
 				  brelse(oldu);
 				  p.p_stat = NULL;
