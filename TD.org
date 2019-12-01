@@ -1388,7 +1388,16 @@ Quelles sont les valeurs affichées pour chacun des processus ?
 
 Le père affiche par contre systématiquement 10. C'est sa propre version de la variable a qu'il regarde, et celle-ci n'a été modifiée par personne.
 
+*** Fonctionnement de fork()
+
+On enregistre dans deux registres visibles du processeur deux pointeurs p1 et p2 vers une structure proc.
+
+
+
+
 *** Question 2
+
+
 
 Le mystère de swtch() et de newproc() est enfin éclairci.
 
@@ -1461,6 +1470,298 @@ La fonction utilise un goto, *ce qui n'est pas un problème*.
 	  goto rm;
   }
 #+END_SRC
+
+
+* TD 7 : 27/11/2019
+
+Aujourd'hui, le fonctionnement du swapper.
+
+On a à peu près fini le fonctionnement des processus, on se rapproche petit à petit du fonctionnement du disque et .
+
+
+
+Le swapper est un processus, le processus d'id 0.
+
+Toujours en mémoire.
+
+S'exécute toujours en mode système.
+
+Priorité maximale : PSWP, la priorité la plus haute. Dès qu'on réveille le swapper, puisque sa priorité d'endormissement est maximale, on déclenche un swtch() à la sortie du mode noyau.
+
+S'endort quand ?
+
+Soit mémoire pleine et rien à swapper : on s'endort sur l'adresse runin.
+Mémoire non pleine, et rien à ramener du swap : on s'endort sur l'adresse runout.
+Pendant les attentes d'entrée-sortie : on s'endort 
+
+Le in et le out sont, on le comprend, définis par rapport au disque et non par rapport à la mémoire.
+
+On réveille sur runout : quand on veut ramener quelqu'un du swap vers la mémoire centrale.
+On réveille sur runin : quand on veut virer quelqu'un de la mémoire centrale, vers le swap.
+
+Aparté :
+
+Autant une écriture peut être asynchrone, autant une lecture ne peut pas l'être. On peut écrire sur le cache tampon, et attendre que le contenu du cache tampon passe sur le disque. Par contre, on ne peut pas vraiment inventer des données.
+
+
+
+La fonction sched :
+
+La fonction appelée par le processus swapper. Le processus swapper est toujours dans cette fonction quand il a la main (il peut bien sûr être dans sleep aussi quand il s'endort).
+
+Analyse de la fonction :
+
+On masque toutes les interruptions.
+
+On parcourt la table des procs, à la recherche d'un processus prêt. Celui qui a le temps résident en disque le plus long est gardé.
+
+Si on en trouve pas, on s'endort sur la variable runout.
+
+
+Ligne 58 : est-ce que le processus a une structure texte.
+Ligne 59 : est-ce que la structure texte du processus est référencée et chargée en mémoire ?
+
+Si oui, rien à faire. Sinon, on augmente la taille du processus de la taille de cette structure texte, et on alloue la place que prend cette structure texte.
+
+Si cette allocation fonctionne :
+
+On charge éventuellement le texte, si il n'est pas déjà chargé.
+On charge les autres structures du processus.
+On libère du disque ce qu'on vient de copier dans la RAM.
+On ajoute le flag "chargé en mémoire" (SLOAD) au processus courant.
+On réinitialise le temps résident.
+On retourne au début.
+
+Si cette allocation ne fonctionne pas :
+
+On cherche une victime. On regarde si il existe un processus chargé, pas système, pas verrouillé en mémoire, endormi ou stoppé.
+
+Si on en a trouvé un, on le vire de la mémoire vers le swap, et on retourne au début.
+
+Est-ce que le temps résident du processus qu'on veut faire rentrer est moins de trois secondes. Si c'est le cas, on s'endort sur runin (on se réveillera toutes les secondes, ou quand un processus s'endort, et on reviendra au début.)
+
+Si le temps résident du processus qu'on veut faire rentrer est de plus de trois secondes, on étend la recherche aux processus prêts, et on prend celui dont le temps résident en mémoire est le plus grand. Si le temps résident en mémoire de ce processus est plus de deux secondes, on le vire, sinon on s'endort.
+
+Le processus swapper ne se termine jamais, il ne fait que s'endormir pour laisser la main à d'autres.
+
+
+On s'intéresse maintenant à la fonction swap.
+
+Permet de faire un transfert de la mémoire vers le disque, ou dans l'autre sens.
+Introduction aux entrées-sorties.
+
+Quand on ramène qqch du disque, on le ramène dans le cache tampon.
+
+xswap est forcément de la mémoire vers le disque.
+
+Description de la fonction :
+
+212-215 : ces lignes sont là si ce n'est pas swapper qui a appelé la fonction xswap.
+
+
+
+[il faut être capable de redessiner l'automate. photo et diagramme]
+
+
+
+
+*** Exercice type examen
+
+Hypothèses :
+
+- Aucun processus autre que swapper ne change d'état.
+- Pas d'autoswap
+- Pas de nouveau proc/pas de exit.
+- La mémoire est pleine.
+- Les I/O << 1 seconde.
+- Le processus p[3] vient de passer à l'état run, via setrun.
+
+La question :
+
+Dans combien de temps le processus d'indice 3 reviendra en mémoire ?
+Donnez l'état de la table des procs au moment où il revient.
+
+On a besoin de la taille de la mémoire.
+
+| index | pwchan | p_time | p_pri | p_stat | p_flag      | p_size | p_addr (RAM ou SWAP) |
+|-------+--------+--------+-------+--------+-------------+--------+----------------------|
+|     0 | runout |    ... |       | SSLEEP | SSYS&SLOAD  |      0 | RAM                  |
+|     1 |        |     44 |       | SSLEEP | SSYS&SLOAD  |      3 | RAM                  |
+|     2 |        |     10 |       | SSLEEP | SLOCK&SLOAD |      2 | RAM                  |
+|     3 |        |      2 |       | SRUN   | NULL        |     14 | SWAP                 |
+|     4 |        |      3 |       | SRUN   | SLOAD       |      2 | RAM                  |
+|     5 |        |      0 |       | SRUN   | SLOAD       |      4 | RAM                  |
+|     6 |        |      0 |       | SSLEEP | SLOAD       |      5 | RAM                  |
+|     7 |        |      4 |       | SSLEEP | SLOAD       |      4 | RAM                  |
+|     8 |        |      0 |       | SRUN   | SLOAD       |      6 | RAM                  |
+
+Taille de la mémoire : 26
+
+La liste des opérations :
+
+- Etat initial, place dispo 0
+- On vire p[6] (premier processus endormi non système), place dispo 5
+
+| index | pwchan | p_time | p_pri | p_stat | p_flag      | p_size | p_addr (RAM ou SWAP) |
+|-------+--------+--------+-------+--------+-------------+--------+----------------------|
+|     0 | runout |    ... |       | SRUN   | SSYS&SLOAD  |      0 | RAM                  |
+|     1 |        |     44 |       | SSLEEP | SSYS&SLOAD  |      3 | RAM                  |
+|     2 |        |     10 |       | SSLEEP | SLOCK&SLOAD |      2 | RAM                  |
+|     3 |        |      2 |       | SRUN   | NULL        |     14 | SWAP                 |
+|     4 |        |      3 |       | SRUN   | SLOAD       |      2 | RAM                  |
+|     5 |        |      0 |       | SRUN   | SLOAD       |      4 | RAM                  |
+|     6 |        |      0 |       | SSLEEP | ~SLOAD      |      5 | SWAP                 |
+|     7 |        |      4 |       | SSLEEP | SLOAD       |      4 | RAM                  |
+|     8 |        |      0 |       | SRUN   | SLOAD       |      6 | RAM                  |
+
+- On vire p[7] (premier processus endormi non système), place dispo 9
+
+| index | pwchan | p_time | p_pri | p_stat | p_flag      | p_size | p_addr (RAM ou SWAP) |
+|-------+--------+--------+-------+--------+-------------+--------+----------------------|
+|     0 | runout |    ... |       | SRUN   | SSYS&SLOAD  |      0 | RAM                  |
+|     1 |        |     44 |       | SSLEEP | SSYS&SLOAD  |      3 | RAM                  |
+|     2 |        |     10 |       | SSLEEP | SLOCK&SLOAD |      2 | RAM                  |
+|     3 |        |      2 |       | SRUN   | NULL        |     14 | SWAP                 |
+|     4 |        |      3 |       | SRUN   | SLOAD       |      2 | RAM                  |
+|     5 |        |      0 |       | SRUN   | SLOAD       |      4 | RAM                  |
+|     6 |        |      0 |       | SSLEEP | ~SLOAD      |      5 | SWAP                 |
+|     7 |        |      0 |       | SSLEEP | ~SLOAD      |      4 | SWAP                 |
+|     8 |        |      0 |       | SRUN   | SLOAD       |      6 | RAM                  |
+
+- Le temps résident du processus à ramener en mémoire est de 2, donc inférieur à 3, donc on s'endort une seconde.
+
+Temps attendu : 1 seconde.
+Etat au réveil.
+
+| index | pwchan | p_time | p_pri | p_stat | p_flag      | p_size | p_addr (RAM ou SWAP) |
+|-------+--------+--------+-------+--------+-------------+--------+----------------------|
+|     0 | runout |    ... |       | SRUN   | SSYS&SLOAD  |      0 | RAM                  |
+|     1 |        |     45 |       | SSLEEP | SSYS&SLOAD  |      3 | RAM                  |
+|     2 |        |     11 |       | SSLEEP | SLOCK&SLOAD |      2 | RAM                  |
+|     3 |        |      3 |       | SRUN   | NULL        |     14 | SWAP                 |
+|     4 |        |      4 |       | SRUN   | SLOAD       |      2 | RAM                  |
+|     5 |        |      1 |       | SRUN   | SLOAD       |      4 | RAM                  |
+|     6 |        |      1 |       | SSLEEP | ~SLOAD      |      5 | SWAP                 |
+|     7 |        |      1 |       | SSLEEP | ~SLOAD      |      4 | SWAP                 |
+|     8 |        |      1 |       | SRUN   | SLOAD       |      6 | RAM                  |
+
+- On rééssaie : le temps résident du candidat est passé à 3, donc on cherche une victime vivante.
+On prend celle dont le temps résident en mémoire est le plus long : p[4].
+Le temps résident de p[4] est bien supérieur à 2, on peut le virer.
+Place disponible 11.
+
+| index | pwchan | p_time | p_pri | p_stat | p_flag      | p_size | p_addr (RAM ou SWAP) |
+|-------+--------+--------+-------+--------+-------------+--------+----------------------|
+|     0 | runout |    ... |       | SRUN   | SSYS&SLOAD  |      0 | RAM                  |
+|     1 |        |     45 |       | SSLEEP | SSYS&SLOAD  |      3 | RAM                  |
+|     2 |        |     11 |       | SSLEEP | SLOCK&SLOAD |      2 | RAM                  |
+|     3 |        |      3 |       | SRUN   | NULL        |     14 | SWAP                 |
+|     4 |        |      0 |       | SRUN   | ~SLOAD      |      2 | SWAP                 |
+|     5 |        |      1 |       | SRUN   | SLOAD       |      4 | RAM                  |
+|     6 |        |      1 |       | SSLEEP | ~SLOAD      |      5 | SWAP                 |
+|     7 |        |      1 |       | SSLEEP | ~SLOAD      |      4 | SWAP                 |
+|     8 |        |      1 |       | SRUN   | SLOAD       |      6 | RAM                  |
+
+- On essaie encore. Le candidat vivant à virer est p[5]. Ce processus a un temps résident en mémoire strictement inférieur à 2, on s'endort.
+
+Temps attendu : 2 secondes
+Etat au réveil.
+
+| index | pwchan | p_time | p_pri | p_stat | p_flag      | p_size | p_addr (RAM ou SWAP) |
+|-------+--------+--------+-------+--------+-------------+--------+----------------------|
+|     0 | runout |    ... |       | SRUN   | SSYS&SLOAD  |      0 | RAM                  |
+|     1 |        |     46 |       | SSLEEP | SSYS&SLOAD  |      3 | RAM                  |
+|     2 |        |     12 |       | SSLEEP | SLOCK&SLOAD |      2 | RAM                  |
+|     3 |        |      4 |       | SRUN   | NULL        |     14 | SWAP                 |
+|     4 |        |      1 |       | SRUN   | ~SLOAD      |      2 | SWAP                 |
+|     5 |        |      2 |       | SRUN   | SLOAD       |      4 | RAM                  |
+|     6 |        |      2 |       | SSLEEP | ~SLOAD      |      5 | SWAP                 |
+|     7 |        |      2 |       | SSLEEP | ~SLOAD      |      4 | SWAP                 |
+|     8 |        |      2 |       | SRUN   | SLOAD       |      6 | RAM                  |
+
+- On essaie encore : le candidat vivant à virer est p[5].
+Son temps résident en mémoire est de 2, on peut le virer.
+
+Place dispo 15.
+
+| index | pwchan | p_time | p_pri | p_stat | p_flag      | p_size | p_addr (RAM ou SWAP) |
+|-------+--------+--------+-------+--------+-------------+--------+----------------------|
+|     0 | runout |    ... |       | SRUN   | SSYS&SLOAD  |      0 | RAM                  |
+|     1 |        |     46 |       | SSLEEP | SSYS&SLOAD  |      3 | RAM                  |
+|     2 |        |     12 |       | SSLEEP | SLOCK&SLOAD |      2 | RAM                  |
+|     3 |        |      4 |       | SRUN   | NULL        |     14 | SWAP                 |
+|     4 |        |      1 |       | SRUN   | ~SLOAD      |      2 | SWAP                 |
+|     5 |        |      0 |       | SRUN   | ~SLOAD      |      4 | SWAP                 |
+|     6 |        |      2 |       | SSLEEP | ~SLOAD      |      5 | SWAP                 |
+|     7 |        |      2 |       | SSLEEP | ~SLOAD      |      4 | SWAP                 |
+|     8 |        |      2 |       | SRUN   | SLOAD       |      6 | RAM                  |
+
+On peut swap in le processus.
+
+| index | pwchan | p_time | p_pri | p_stat | p_flag      | p_size | p_addr (RAM ou SWAP) |
+|-------+--------+--------+-------+--------+-------------+--------+----------------------|
+|     0 | runin  |    ... |       | SSLEEP | SSYS&SLOAD  |      0 | RAM                  |
+|     1 |        |     46 |       | SSLEEP | SSYS&SLOAD  |      3 | RAM                  |
+|     2 |        |     12 |       | SSLEEP | SLOCK&SLOAD |      2 | RAM                  |
+|     3 |        |      0 |       | SRUN   | SLOAD       |     14 | RAM                  |
+|     4 |        |      1 |       | SRUN   | ~SLOAD      |      2 | SWAP                 |
+|     5 |        |      0 |       | SRUN   | ~SLOAD      |      4 | SWAP                 |
+|     6 |        |      2 |       | SSLEEP | ~SLOAD      |      5 | SWAP                 |
+|     7 |        |      2 |       | SSLEEP | ~SLOAD      |      4 | SWAP                 |
+|     8 |        |      2 |       | SRUN   | SLOAD       |      6 | RAM                  |
+
+Place dispo : 1
+swapper s'endort sur runin.
+
+*** Exercice de l'an dernier
+
+Taille de la mémoire = 20.
+
+Table des processus :
+
+| index | p_pid | p_uid | p_flag      | p_stat | p_size | p_time | p_wchan  | p_pri |
+|-------+-------+-------+-------------+--------+--------+--------+----------+-------|
+|     0 |     0 |     0 | SSYS&SLOAD  | SSLEEP |      2 |    120 | runout   | PSWP  |
+|     1 |     1 |     0 | SSYS&SLOAD  | SSLEEP |      4 |    125 | &proc[1] | PWAIT |
+|     2 |   101 |  1000 | SLOAD       | SSLEEP |      1 |      1 | &toto    | 50    |
+|     3 |   102 |  1000 | SLOCK&SLOAD | SSLEEP |      3 |     10 | &toto    | 50    |
+|     4 |   103 |  1000 | SLOAD       | SRUN   |     10 |      0 |          | 50    |
+|     5 |   104 |  1000 | NULL        | SLEEP  |     10 |     10 | &toto    | 50    |
+|     6 |   105 |  1000 | NULL        | SLEEP  |     10 |      5 | &toto    | 50    |
+
+Pas de fork, pas de exit, pas de wakeup(&toto)
+
+Temps d'exécution du code noyau (appels système, swapper, init) et E/S sont négligeables.
+Segments de texte non pris en compte.
+
+**** Question 1
+
+On suppose qu'à t=0 le proc 103 exécute kill(104, SIGUSR1) et entre dans une boucle infinie, d'instructions ne comportant pas d'appel système.
+Montrer que le swapper va se réveiller.
+
+kill la fonction API utilisateur est exécutée, donc le code de kill appel système est exécuté.
+Dans le code de kill, on a un appel à psignal.
+psignal va appeler setrun sur 104
+104 n'a pas le flag SLOAD, wakeup est donc appelé sur &runout.
+Or le processus swapper est endormi sur runout. Le processus swapper sera élu lors de la prochaine élection, qui va arriver tout de suite (runrun++).
+
+Les filtres de priorité sont bien respectés [à spécifier si on veut tous les points].
+
+**** Question 2
+
+A quelle date 104 va-t-il commencer à s'exécuter pour traiter le signal.
+
+On part du principe que le swapper commence à s'exécuter à t=0.
+
+Mémoire occupée : 20 Mémoire totale : 20.
+
+On exécute le code de swapper. On veut faire rentrer.
+
+
+Sur quelle adresse le swapper s'endort lorsque 104 s'exécute.
+
+En supposant que la signal SIGUSR1 provoque un calcul de 9 secondes sur le proc 104., combien de temps.
+
 
 
 
