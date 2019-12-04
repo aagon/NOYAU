@@ -370,7 +370,7 @@ spl est le set priority level : fonction qui permet de masquer toutes les interr
 CLINHB au moins aussi prioritaire que l'horloge : on fait ça pour changer des champs des structures proc, qui ont une influence sur l'ordonnanceur : *ces champs sont archi critiques*, c'est uniquement pour cette raison que le noyau se permet cette opération extrêmement violente de masquer toutes les interruptions, même l'interruption horloge.
 
 #+BEGIN_QUOTE
-Interruption, c'est comme si j'appelais une fonction sans l'avoir voulu : les données de la fonction handler de l'interruption sont empilées au-dessus (en-dessous en fait) des données du processus, ce qui fait que quand l'appel est fini, c'est comme si on dépilait : le stack pointer est directement au bon endroit pour reprendre l'execution directement où elle a été laissée.
+Interruption, c'est comme si j'appelais une fonction sans l'avoir voulu : les données de la fonction handler de l'interruption sont empilées au-dessus (en-dessous en fait) des données du processus, ce qui fait que quand l'appel est fini, c'est comme si on dépilait : le pointeur de pile est directement au bon endroit pour reprendre l'execution directement où elle a été laissée.
 
 Jonathan Lejeune
 #+END_QUOTE
@@ -1259,13 +1259,13 @@ Un pointeur vers une structure proc (dans le registre).
 Seulement si p est le pointeur NULL, on fait pointer p vers le premier élément du tableau (la struct proc du processus 0, le scheduler).
 Si p n'est pas le pointeur NULL, alors il garde la valeur qu'il avait lors du dernier appel à swtch() : c'est pour cette raison qu'on a déclaré p avec le mot-clé static. Pourquoi on fait ça ? On veut que la recherche reprenne exactement là où on l'a interrompu la dernière fois.
 
-On met le stack pointer dans la structure u du processus qui a appelé swtch (dans le champ u_rsav, plus spécifiquement).
+On met le pointeur de pile dans la structure u du processus qui a appelé swtch (dans le champ u_rsav, plus spécifiquement).
 
 savu sauvegarde le SP dans la structure passée en paramètre.
 
 On charge dans les registres du processeur les registres sauvegardés en mémoire du scheduler (le processus 0) : u a changé.
 
-aretu permet de changer le stack pointer sans commuter (retu en un peu moins puissant).
+aretu permet de changer le pointeur de pile sans commuter (retu en un peu moins puissant).
 
 On a un label de loop :
 runrun est remis à 0
@@ -1287,10 +1287,10 @@ Je charge le registre qui donne l'adresse de sa table des pages.
 sureg() : en fait, retu ne fait que changer la zone U, sureg() change les autres segments genre la pile U, les données et le code. On n'a pas fait sureg à l'entrée dans le processus 0 car ce processus n'a pas de pile, ni de code, ni de données (il écrit dans la pile du noyau, il manipule des données globales du noyau, et son code est celui du noyau)
 
 ligne 69-72 : réponse dans deux épisodes.
-Avant-goût : On vérifie si le champ p_flag du processus sélectionné porte le flag SSWAP (est-ce que le processus est en train de se faire swapped out).
-Si oui, alors on l'enlève, et on change le stack pointer vers la valeur enregistrée dans u_ssav la dernière fois qu'on a appelé savu (on sait qu'on a appelé savu, parce qu'on part du principe que tous processus qui a existé a appelé swtch(), et que swtch() fait un appel à savu).
+Avant-goût : On vérifie si le champ p_flag du processus sélectionné porte le flag SSWAP (est-ce que le processus a été créé dans le swap).
+Si oui, alors on l'enlève, et on change le pointeur de pile vers la valeur enregistrée dans u_ssav la dernière fois qu'on a appelé savu (on sait qu'on a appelé savu, parce qu'on part du principe que tous processus qui a existé a appelé swtch(), et que swtch() fait un appel à savu).
 
-Si on a élu un processus, c'est qu'il est chargé en mémoire. Donc ce flag SSWAP est ancien, et il doit être enlevé (d'ailleurs, on l'enlève). En fait, c'est lié au fork. Quand un processus fork, s'il n'y a pas assez de mémoire pour le nouveau processus, on peut immédiatement swap out le fils. Pendant ce swap-là, on enregistre le pointeur de pile du fils dans son u_ssav, avant de le swap out.
+Si on a élu un processus, c'est qu'il est chargé en mémoire. Donc ce flag SSWAP peut être enlevé et on l'enlève. En fait, c'est lié au fork. Quand un processus fork, s'il n'y a pas assez de mémoire pour le nouveau processus, on peut immédiatement swap out le fils. Pendant ce swap-là, on enregistre le pointeur de pile du fils dans son u_ssav, avant de le swap out.
 
 Si ensuite par chance il s'est fait reswap in, on rétablit son pointeur de pile. (pas encore très clair)
 
@@ -1392,82 +1392,239 @@ Le père affiche par contre systématiquement 10. C'est sa propre version de la 
 
 On enregistre dans deux registres visibles du processeur deux pointeurs p1 et p2 vers une structure proc.
 
+On sauve dans p1 le pointeur vers le processus courant.
 
+On itère dans la table des processus à la recherche d'une entrée libre (telle que p_stat == NULL), on fait pointer p2 vers cette entrée.
+Si on est à la fin de la table des processus et qu'on a pas trouvé de place libre, on retourne une erreur, on met une valeur d'erreur sur la pile utilisateur pour la valeur de retour de l'appel système côté user.
 
+Sinon, on appelle newproc qui créé le fils, et en fonction de son retour (newproc retourne 1 pour le processus fils, et 0 pour le processus père), on retourne 0 (respectivement le pid du fils créé) et on initialise des champs (les champs avec les stats de temps) de la structure proc du fils à 0 (respectivement on ne fait rien).
 
-*** Question 2
+Ce fonctionnement est basé sur la capacité de newproc à retourner une valeur distincte selon si le processus courant est le père et le fils.
 
+On va se pencher maintenant sur le fonctionnement de la fonction qui fait le gros du travail, la fonction newproc.
 
+*** Fonctionnement de newproc
 
-Le mystère de swtch() et de newproc() est enfin éclairci.
+La fonction newproc déclare dans sa pile deux entiers (a1 et a2), deux pointeurs vers une struct proc p et up.
 
-Le mécanisme de création des nouveaux processus détaillé.
+Elle demande aussi un pointeur vers une struct proc rpp dans un registre, ainsi qu'un pointeur vers un entier et un entier.
 
-[à reprendre correctement, en bon français]
+Un des pointeurs vers struct proc dans la pile est initialisé à NULL.
 
-[reprendre aussi le cas du swap]
+La variable globale mpid est incrémentée.
 
-*** Question perso
+Le pointeur dans le registre *parcourt inconditionnellement la table des procs*, et ce dans sa totalité. Si il trouve une place libre, il stocke son adresse dans le pointeur précédemment initialisé à NULL.
+
+Si le pid d'un des éléments de la table est égal à mpid, on incrémente mpid, et on recommence le parcours de la table *du début*.
+
+Si on sort de la boucle et que le pointeur initialisé est toujours à NULL, c'est qu'on a trouvé aucune entrée libre. Dans ce cas, on a une panique noyau, Cette situation ne peut pas arriver parce qu'on a vérifié avant l'appel à newproc l'existence d'une entrée libre.
+
+À la sortie de cette boucle, on a si tout va bien un pointeur vers une entrée libre, ainsi que dans mpid une valeur qu'on sait avec certitude n'être égale à aucun des pid présents dans la table (ni même à aucun des pid reliquats des entrées libres, ce qui ne semble pas nécessaire à première vue).
+
+Le pointeur vers entier qu'on a stocké dans le registre est cast en pointeur vers struct proc (est-ce seulement possible en C K&R, pas sûr...) pour stocker un pointeur vers le processus courant (donc le père qui s'apprête à créer son fils).
+
+Le pointeur vers le processus courant est aussi stocké sur la pile.
+
+Dans l'entrée libre de la table des procs qu'on a sélectionné, on met l'état SRUN, le flag SLOAD, l'UID du père, le [pseudo-]terminal du père, le nice, le pointeur vers la zone de texte, mpid dans le champ pid, et le pid du père dans le champ ppid, et 0 dans le champ du temps résident.
+
+Les descripteurs de fichier du père sont passés au fils (le pointeur vers entier casté en pointeur vers struct proc redevient pointeur vers entier au passage).
+
+Le compteur de références vers la zone de texte est incrémenté, de même que le compteur de références par des processus chargés en mémoire.
+
+Le compteur de références à l'inode du répertoire courant (qui est un fichier, ne l'oublions pas) est incrémenté.
+
+On sauvegarde le pointeur de pile courant dans la structure u_rsav du processus courant.
+
+Le pointeur vers la structure proc du processus courant est sauvée (ligne 100), le pointeur vers la structure proc de la structure user du processus courant est écrasé avec celui vers la structure proc du fils : le père prend l'identité de son fils.
+
+Le champ taille mémoire du processus fils prend la taille de son père.
+
+On tente d'allouer dans la mémoire la place correspondant à cette taille mémoire. Deux cas possibles :
+
+**** L'allocation échoue
+
+Si cette allocation échoue pour manque de place, on écrit alors l'image mémoire du processus dans le swap : on fait passer l'état du processus père à SIDL, on stocke dans le champ d'adresse de l'image mémoire du fils celle du père.
+
+On sauvegarde le pointeur de pile courant dans la structure u_ssav du père, on copie (sans effacer, attention !) l'image mémoire du père dans le swap (la copie sera utilisée par le fils).
+
+Ici, faisons bien attention : le pointeur de pile courant qu'on a sauvé à la ligne 114 fait bien partie des données qu'on est en train de copier. À la fin de cette copie, le fils a bien le pointeur de pile de là où on est maintenant sauvé dans sa propre structure u_ssav aussi.
+
+Le pointeur de pile courant qu'on avait sauvé à la ligne 99 fait aussi partie des données qu'on a copié.
+
+On met l'état du fils à SSWAP, et on remet l'état du père à SRUN.
+
+**** L'allocation réussit
+
+- Soit cette allocation réussit, on copie simplement tous les blocs un à un de l'image mémoire du père vers la zone mémoire juste allouée pour le fils.
+
+**** Sortie de l'alternative
+
+À ce moment, le père récupère son identité.
+
+On sort de la fonction, avec la valeur de retour 0.
+
+**** Et le fils ?
+
+À ce moment, le fils n'a encore jamais jamais eu le processeur de sa vie, il n'a exécuté aucune instruction (en particulier aucune instruction de cette fonction)
+
+Où est-ce que le fils va apparaître ? Autrement (mieux) dit, où est la toute première instruction que le fils va exécuter ? Vous l'avez compris, dans le code de swtch() : le registre pointeur d'instruction du processeur est à la ligne 57 du code de swtch() juste avant que le fils "obtienne le processeur".
+
+Transportons-nous maintenant dans le code de swtch(), à la ligne 57. Le processeur exécute l'appel à la fonction retu.
+
+On le rappelle, la fonction retu permet d'activer la partie de la table des pages qui décrit la correspondance entre l'adresse virtuelle et l'adresse physique de la zone U. Autrement dit, permet (entre autres) de changer de structure u.
+
+retu implique entre autres un appel à aretu, qui copie simplement de l'entier passé en paramètre vers le registre pointeur de pile du processeur. La fonction retu appelle aretu sur u_rsav.
+
+À la fin de cette instruction, le pointeur de pile dans le registre idoine du processeur est mis à la valeur qui lui avait été passée à la ligne 99 de la fonction newproc. Ce pointeur de pile est une adresse virtuelle, dont la correspondance avec l'adresse physique est donnée par la table des pages : l'appel à retu garantit que cette adresse se résout vers l'adresse physique de la pile du fils et non du père (parce que l'adresse virtuelle du pointeur de pile du père et de celui du fils peuvent parfaitement être encore la même : on a eu une copie simple à 115 ou à 124 de newproc).
+
+Donc à ce moment là, le registre pointeur de pile contient l'adresse du mot de la pile qui stocke le mot d'instruction correspondant à l'instruction de la ligne 15 de la fonction fork (l'instruction de comparaison, plus précisément : l'instruction C de la ligne 15 se transcrit en au moins de deux instructions assembleur : un instruction de stockage de la valeur de retour, et une instruction de comparaison de la valeur de retour à 1 : c'est bien de cette deuxième instruction qu'il est question ici).
+
+Le processeur appelle sureg, ce qui lui permet d'activer le reste des correspondances de la table des pages (celles qui donnent la pile U, les données, le code).
+
+Si le processus sort maintenant de la fonction, il sort avec la valeur de retour 1, et il se retrouve à devoir exécuter la deuxième partie de l'instruction de la ligne 15 de la fonction fork(), et ainsi de suite.
+
+Si le processus avait été créé dans le swap (il en a depuis été ramené, vous vous en doutez bien), on enlève son flag SSWAP, et on charge dans le registre pointeur de pile l'adresse sauvée à la ligne 114 de newproc.
+
+Donc à ce moment là, exactement comme plus haut, le registre pointeur de pile contient l'adresse du mot de la pile qui stocke le mot d'instruction correspondant à l'instruction de comparaison de la ligne 15 de la fonction fork.
+
+Si le processus sort maintenant de la fonction (et il le fait), il sort avec la valeur de retour 1, et il se retrouve à devoir exécuter la deuxième partie de l'instruction de la ligne 15 de la fonction fork(), et ainsi de suite.
+
+Quoiqu'il se soit passé avec ces histoires de swap à la naissance ou non, on veut qu'à la sortie de la fonction swtch(), le processus fils aille exécuter l'instruction de comparaison de la ligne 15, et ignore tout le bruit potentiellement arbitraire qui a pu être mis dans la pile entre temps. Les sauvegardes de pointeur de pile dans la fonction newproc() et ses chargements à la fin de swtch() répondent à cette exigence.
+
+De surcroît, la valeur de retour de swtch() sert à distinguer le père et le fils. Le père arrive à l'instruction de comparaison de la ligne 15 de fork() en venant de newproc, donc avec une valeur de retour de 0. Le fils arrive à cette même instruction depuis swtch(), donc avec une valeur de retour de 1.
+
+*** Apartés et aphorismes nuls
+
+#+BEGIN_THEOREM
+Le processeur ne voit pas de processus, il ne voit que des instructions.
+#+END_THEOREM
+
+#+BEGIN_THEOREM
+Un processus n'obtient pas le processeur, c'est le processeur qui va chercher ses instructions dans le contexte d'un processus plutôt que d'un autre.
+#+END_THEOREM
+
+*** La fonction exit()
+
+On alloue, dans les registres visibles du processeur, un pointeur vers un entier, un entier, un pointeur vers une structure proc.
+
+On enlève le flag STRC au processus courant.
+
+On met 1 à tous les éléments de la table u_signal du processus courant, ce qui revient donc à effectivement ignorer tous les signaux reçus par le processus courant (cf. les lignes 84 et 85 de la fonction issig).
+
+On ferme tous les descripteurs de fichier ouverts, et on supprime leurs référence de la table des fichiers.
+
+On décrémente le compteur de références vers l'inode du répertoire courant.
+
+On décrémente aussi le compteur de références vers le segment de code (opération qu'on ne voit pas ici, voir aparté et version Lions du code).
+
+On alloue dans le swap 1 bloc. Si cette opération échoue, panique.
+
+Cette allocation dans le swap est une allocation mémoire, mais qui se fait sur une section du disque. Elle ne réserve aucun espace dans la mémoire, juste un bloc sur le disque.
+
+La fonction getblk réserve de la place dans le cache tampon de la mémoire, place dans laquelle est copiée le bloc du disque dont l'adresse est passée en deuxième paramètre (le premier paramètre est le matériel). La valeur de retour de la fonction est un pointeur vers une structure buf.
+
+Grâce à cette fonction, on obtient un pointeur vers une structure buf, qui contient l'adresse en mémoire centrale (dans le cache tampon plus précisément) du bloc cache tampon copié depuis le bloc disque (ici, le processus courant fait une entrée/sortie, il va donc s'endormir).
+
+La fonction bcopy nous permet de copier les n octets depuis l'adresse adr1 vers l'adresse adr2, adr1 étant le premier paramètre, adr2 étant le deuxième, et n étant le troisième. Elle permet aussi probablement de marquer le bloc mémoire comme modifié, devant donc être synchronisé vers le disque à un moment opportun (pure hypothèse, en vrai on n'en sait rien).
+
+Comme là c'est un peu urgent, on demande explicitement la synchronisation du bloc tampon cache vers le bloc disque. (là techniquement, le processus courant fait une entrée/sortie, il va donc s'endormir).
+
+On garde un pointeur dans le registre vers la structure proc du processus courant.
+
+On vide de la mémoire toute l'image mémoire du processus (sa structure u, sa pile S [la raison pour laquelle exit() ne manipule jamais jamais la pile mais seulement du registre ou des variables globales], sa pile U, ses données)
+
+Dans la structure proc du processus courant (qui, on le rappelle, ne fait pas partie de l'image mémoire du processus), le champ p_addr qui stocke l'adresse du premier octet du premier bloc de l'image mémoire contient maintenant l'adresse du bloc du swap qui contient la structure u du processus courant.
+
+On fait passer l'état du processus courant à SZOMB.
+
+On parcourt la table des procs. On réveille son père si on le trouve.
+
+Si on trouve son père, on notifie tous ses fils que leur nouveau père est le processus de pid 1, le processus init, et on les réveille si ils sont stoppés ou tracés (? leur p_state égale SSTOP). Ensuite, on appelle swtch(), appel dont on ne retournera jamais.
+
+Si à la sortie de la boucle qui parcourt la table des procs, on a pas trouvé son père, on se voit adopté par le processus init, puis renvoyé dans la boucle.
+
+**** Aparté entrées/sorties
+
+En deux endroits au moins le processus fait une entrée/sortie. Il va perdre le processeur au moins deux fois. On a bien pris garde à ne tenir aucun compte des signaux et à laisser l'état du processeur à SRUN. On est bien sûr que le processus va récupérer le processeur au même endroit à partir d'un certain moment.
+
+**** Aparté segment texte (ou code)
+
+Lors de la création d'un processus, on prend soin d'incrémenter le compteur de référence de la structure texte vers laquelle pointe p_textp.
+
+Il n'y a pas, dans le code de exit présenté ici, de décrémentation symétrique, ce qui est incohérent.
+
+Dans la version Lions du code, on a effectivement un appel à xfree(), placé entre la ligne 16 et la ligne 19 de notre version du code. Cette fonction se charge de décrémenter les compteurs de référence vers la zone de texte, de libérer la mémoire et le swap si ces compteurs tombent à 0.
+
+L'image mémoire d'un processus ne comprend donc pas son segment de code.
+
+*** Question 6
 
 Implémenter le code de wait, selon la spécification POSIX, ou plutôt selon la simplification Lejeune de la spécification POSIX.
 
 La fonction doit :
 
 - Si le processus appelant n'a pas de fils, ni zombie ni vivant (aussi bien prêt que élu que bloqué/endormi), la fonction se termine, l'exécution n'est pas bloquante.
-- Si le processus appelant a au moins un fils zombie, indépendemment de son nombre de fils actifs, il écrit la valeur de retour de son fils (le premier dans l'ordre de la table des processus) dans le pointeur qui lui a été passé en paramètre (si aucun pointeur ne lui a été passé en paramètre, il écrit la valeur de retour du fils dans le pointeur NULL, c'est-à-dire dans le vide [à vérifier : est-ce qu'on est sûr qu'écrire dans le pointeur NULL est un comportement défini ?]), il libère le bloc dans lequel la structure u du zombie a été stockée lors du exit() du fils, il libère l'entrée correspondant à la structure p du fils, et il retourne enfin le pid du fils. Dans ce cas, la fonction se termine, l'exécution n'est pas bloquante.
+- Si le processus appelant a au moins un fils zombie, indépendemment de son nombre de fils actifs, il écrit la valeur de retour de son fils (le premier dans l'ordre de la table des processus) dans le pointeur qui lui a été passé en paramètre. Si aucun pointeur, ou le pointeur NULL lui a été passé, il n'écrit rien. Puis il libère le bloc dans lequel la structure u du zombie a été stockée lors du exit() du fils, il libère l'entrée correspondant à la structure p du fils, et il retourne enfin le pid du fils. Dans ce cas, la fonction se termine, l'exécution n'est pas bloquante.
 - Si le processus appelant n'a pas de fils zombie, mais au moins un fils vivant, l'exécution est bloquante : le processus appelant s'endort, jusqu'à ce que son fils devienne zombie, moment auquel il reprend l'alternative 2.
 
-Voilà notre solution : elle est a priori assurée de fonctionner (l'éventuel comportement indéfini mentionné plus haut à peu près).
+Voilà notre solution : elle est a priori assurée de fonctionner.
 
-On n'est pas très content de parcourir deux fois la table des processus, une fois pour compter, une fois pour nettoyer.
+On n'est en revanche pas capable de tester si l'utilisateur a effectivement passé un paramètre à l'appel système côté user wait(2). Il y a bien toujours quelque chose à u.u_arg[0], mais on n'a aucune manière de vérifier que cette chose interprétée comme un entier veut bien dire quelque chose, qu'elle fait référence à une adresse légale du processus, etc... Tout ça est quand même très important : quand on exécute le code de wait, on est en mode système, on peut écrire dans toutes les adresses sans peine, potentiellement écraser des informations importantes.
 
-La fonction utilise un goto, *ce qui n'est pas un problème*.
+On a deux manières de régler le problème. Soit on décide de ne pas écrire la valeur de retour du fils à une adresse mémoire, mais dans un registre, et à l'appel système côté utilisateur d'aller l'y chercher (suppose d'être sûr que ce registre ne sera pas écrasé entre temps). C'est, d'après le Lions, la solution choisie par MM. Thompson et Ritchie.
+
+Soit l'appel système côté utilisateur, avant le passage en mode noyau, s'assure de ce que l'appel système côté noyau trouvera en u.u_arg[0] une adresse valable si une adresse est spécifiée (erreur et sortie prématurée sinon), une adresse "poubelle" (par exemple l'adresse d'un entier de sa propre pile destinée à être dépilée après le retour du mode noyau) si rien ou NULL est passé en paramètre. D'après ce qu'on sait, c'est la manière dont fonctionnent les unix modernes : la fonction API utilisateur est en fait une fonction d'enveloppe qui vérifie que toutes les hypothèses faites par l'appel système côté noyau sont respectées.
+
+Tout ça pour dire : dans notre implémentation, on écrira directement dans une adresse mémoire, en faisant toutes les hypothèses de correction sur cette adresse.
+
+La fonction utilise un goto, *ce qui n'est pas un problème*. Tant qu'on arrive à garder les choses simples, il n'y a aucun problème à utiliser goto.
 
 #+BEGIN_SRC c
   wait()
   {
-	  struct proc *p;
-	  struct u *oldu;
-	  int nfv = 0;
-	  int nfz = 0;
-	  int *status = u.u_arg[0];
+	  register struct proc *p;
+	  struct buf *b;
+	  int f = 0;
 
+  loop:
 	  for (p = &proc[0]; p != &proc[NPROC]; p++) {
-		  if ((p.p_stat & SZOMB) &&
-		      (u.u_procp->pid == p.p_ppid)) {
-			  nfz++;
+		  if ((p->p_stat & SZOMB) &&
+		      (u.u_procp->pid == p->p_ppid)) {
+			  u.u_ar0[R0] = p->p_pid;
+
+			  /* Fonctionne aussi avec bread() */
+			  b = getblk(swapdev, p->p_addr);
+			  ,*(u.u_arg[0]) = b->b_addr->u_ar0[R0];
+			  brelse(b);
+
+			  mfree(swapmap, 1, p->p_addr);
+
+			  p->p_stat = NULL;
+
+			  /* Ici on copie le Lions */
+			  /* On n'aurait pas pensé à faire ce nettoyage */
+			  p->p_pid = 0;
+			  p->p_ppid = 0;
+			  p->p_sig = 0;
+			  p->p_ttyp = 0;
+			  p->p_flag = 0;
+
+			  return;
 		  }
 
-		  if ((p.p_stat & SRUN) &&
-		      (u.u_procp->pid == p.p_ppid)) {
-			  nfv++;
-		  }
-	  }
-
-	  if ((nfv == 0) && (nfz == 0)) {
-		  u.u_ar0[R0] = -1;
-		  return;
-	  }
-
-  rm:
-	  if ((nfz > 0)) {
-		  for (p = &proc[0]; p != &proc[NPROC]; p++) {
-			  if ((p.p_stat & SZOMB) &&
-			      (u.u_procp->pid == p.p_ppid)) {
-				  oldu = bread(swapdev,p->p_addr);
-				  ,*status = oldu->b_addr->u_arg[0];
-				  mfree(swapmap,1,p->p_addr);
-				  brelse(oldu);
-				  p.p_stat = NULL;
-				  u.u_ar0[R0] = p.pid;
-				  return;
-			  }
+		  if ((p->p_stat & SRUN) &&
+		      (u.u_procp->pid == p->p_ppid)) {
+			  f++;
 		  }
 	  }
 
-	  sleep(u.u_procp,PWAIT);
+	  if (f) {
+		  sleep(u.u_procp, PWAIT);
+		  goto loop;
+	  }
 
-	  goto rm;
+	  u.u_ar0[R0] = -1;
+	  return;
   }
 #+END_SRC
 
@@ -1476,38 +1633,67 @@ La fonction utilise un goto, *ce qui n'est pas un problème*.
 
 Aujourd'hui, le fonctionnement du swapper.
 
-On a à peu près fini le fonctionnement des processus, on se rapproche petit à petit du fonctionnement du disque et .
+On commence à avoir fait le tour du fonctionnement des processus, on se rapproche petit à petit du fonctionnement du disque et du cache tampon.
+
+*** Les caractéristiques du swapper
+
+Le swapper est le processus d'id 0.
+
+Il est toujours en mémoire, il s'exécute toujours en mode système : il n'exécute que du code système.
+
+Sa priorité est la priorité PSWAP la plus prioritaire (minimale, donc). C'est la priorité qu'il a tout le temps (pas seulement quand il est endormi). On sait donc que quand on réveille le swapper :
+- On force une nouvelle élection (runrun++, cf. code de setrun), dès la sortie du mode noyau.
+- On sait qu'on va élire le swapper.
+
+*** runin et runout
+
+Dans quelles conditions le swapper s'endort-il ?
+
+- Soit la mémoire est pleine et on a rien à évincer immédiatement : on s'endort sur runin (cf. ligne 129).
+- Soit la mémoire est non pleine, mais on n'a rien à rappeler : on s'endort sur runout (cf. ligne 45).
+- On s'endort bien entendu aussi pendant les entrées/sorties bloquantes, même si ça ne se verra pas forcément dans le code de cette fonction-là précisément.
+
+Dans quelles conditions le swapper est-il réveillé ?
+- Quand ses entrées/sorties sont finies, on imagine qu'il est réveillé par une interruption matérielle, même si on ne le voit pas encore dans le code.
+- On veut ramener quelque processus du swap vers la mémoire centrale, par exemple quand on le réveille (cf. ligne 102 de setrun()), ou alors on vient d'évincer quelque processus, et on veut que le swapper vérifie s'il peut ramener quelque autre processus (cf. ligne 212 de xswap()) : on réveillera alors l'adresse runout.
+- On veut signaler au swapper qu'on vient de s'endormir, et qu'on se porte volontaire pour se faire évincer (cf. ligne 40 de sleep()), ou alors une seconde vient de passer, et on doit réveiller le swapper de toute façon (cf. ligne 84 de realtime) : on réveillera alors sur l'adresse runin.
+
+#+BEGIN_THEOREM
+On réveille sur runout quand on veut rappeler quelque processus du swap vers la mémoire centrale.
+
+On réveille sur runin quand on veut évincer quelque processus de la mémoire centrale vers le swap.
+
+"in" et "out" sont toujours "in" le swap et "out" le swap.
+#+END_THEOREM
+
+*** Apartés et aphorismes nuls
+
+#+BEGIN_THEOREM
+Une écriture peut être asynchrone, une lecture ne le peut pas, à moins d'inventer ce qu'on lit.
+#+END_THEOREM
+
+*** Algorithme de la fonction sched()
+
+Cette fonction est la boucle principale du processus swapper. Le processus est toujours dans cette fonction (ou des fonctions appelées par celle-ci) quand il a la main.
+
+L'algorithme n'est pas si compliqué que ça, mais il est long. Le plus clair est encore de faire un automate.
 
 
+#+NAME: bonjour
+#+BEGIN_SRC dot :results output verbatim drawer :cmd graph-easy :cmdline --as_ascii
 
-Le swapper est un processus, le processus d'id 0.
+  digraph TestGraph1 {
+      rankdir=LR
+      "x" -> "b";
+      "c" -> "b";
+      "b" -> "d";
+  }
 
-Toujours en mémoire.
-
-S'exécute toujours en mode système.
-
-Priorité maximale : PSWP, la priorité la plus haute. Dès qu'on réveille le swapper, puisque sa priorité d'endormissement est maximale, on déclenche un swtch() à la sortie du mode noyau.
-
-S'endort quand ?
-
-Soit mémoire pleine et rien à swapper : on s'endort sur l'adresse runin.
-Mémoire non pleine, et rien à ramener du swap : on s'endort sur l'adresse runout.
-Pendant les attentes d'entrée-sortie : on s'endort 
-
-Le in et le out sont, on le comprend, définis par rapport au disque et non par rapport à la mémoire.
-
-On réveille sur runout : quand on veut ramener quelqu'un du swap vers la mémoire centrale.
-On réveille sur runin : quand on veut virer quelqu'un de la mémoire centrale, vers le swap.
-
-Aparté :
-
-Autant une écriture peut être asynchrone, autant une lecture ne peut pas l'être. On peut écrire sur le cache tampon, et attendre que le contenu du cache tampon passe sur le disque. Par contre, on ne peut pas vraiment inventer des données.
+#+END_SRC
 
 
+#+CALL: bonjour[:results output verbatim drawer :cmd graph-easy :cmdline --as_ascii]()
 
-La fonction sched :
-
-La fonction appelée par le processus swapper. Le processus swapper est toujours dans cette fonction quand il a la main (il peut bien sûr être dans sleep aussi quand il s'endort).
 
 Analyse de la fonction :
 
@@ -1770,5 +1956,9 @@ En supposant que la signal SIGUSR1 provoque un calcul de 9 secondes sur le proc 
 Les supports de TD :
 
 [[./TDTME.pdf][TD]]
+
+La version Lions du code :
+
+[[./unixv6Lions.pdf][Lions]]
 
 
