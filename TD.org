@@ -1946,10 +1946,174 @@ On exécute le code de swapper. On veut faire rentrer.
 
 Sur quelle adresse le swapper s'endort lorsque 104 s'exécute.
 
-En supposant que la signal SIGUSR1 provoque un calcul de 9 secondes sur le proc 104., combien de temps.
+En supposant que la signal SIGUSR1 provoque un calcul de 9 secondes sur le proc 104., combien de temps après l'envoi du signal va se terminer le calcul.
+
+[ Réponses ]
+t = 2 [ refaire le calculs ]
+On s'endort sur runin.
+
+On échange le place dans la mémoire entre 103 et 104 toutes les 3 seconde : donc 104 termine son exécution au plus tôt à 17 secondes.
+
+* TD 8 : 04/12/2019
+
+Aujourd'hui, le cache tampon (ou cache d'entrée/sortie)
+
+Cache what ? [ Rappeler une bonne définition générale ]
+
+Mémoire qui entretient un certain rapport avec une mémoire d'intérêt plus grande et plus lente.
+
+Aujourd'hui, toute la mémoire non utilisée est utilisée comme cache tampon.
+
+Cache logiciel : implanté en logiciel [ Bonne définition ]
+
+Utilité : Accélérer les accès aux données de la mémoire d'intérêt.
+
+Algorithme général de fonctionnement du cache :
+
+Est-ce que la donnée est dans le cache, si oui fin.
+Sinon, le cache récupère la donnée de la mémoire d'intérêt.
+On lit.
+
+Pour l'écriture ?
+
+Comment gérer la cohérence entre cache et mémoire ?
+Quelle donnée évincer du cache en cas de remplissage ?
+
+L'écriture suppose aussi la présence d'un bloc du cache, donc suppose éventuellement un accès mémoire pour ramener la mémoire dans le cache, et aussi un autre accès pour répercuter l'écriture.
+
+Concept de localité [ définition à reprendre ]
+
+LRU : On évince la donnée la moins récemment utilisée.
+
+*** La structure buf
+
+On a deux chaînes de blocs doublement chaînés.
+
+b_dev : identifiant du matériel : un entier, vecteur de bits. Bits de poids fort donnent l'indentifiant du driver : code très bas niveau qui va permettre d'utiliser le périphérique, bits de poids faible donnent le numéro de device qu'on veut utiliser avec ce driver.
+
+b_count : nombre de données qui restent à transférer vers ou depuis le device : 0 égale fin d'entrée/sortie.
+
+buffers sont les données du cache (type un peu spécial, à reprendre)
+
+b_blkno : numéro de bloc dans le device
+
+
+Organisé en table de hachage.
+
+[ reprendre le dessin ]
 
 
 
+Les drivers doivent pouvoir ouvrir 
+
+Une fonction d'entrée/sortie doit avoir un device, et une structure buf *préparée*.
+
+#+BEGIN_SRC c
+  doIO(device device, struct buf *buffer)
+  {
+	  ,*(bdevsw[bmajor(device)].d_strategy)(buffer);
+  }
+#+END_SRC
+
+
+*** bread
+
+On doit écrire cette fonction.
+
+#+BEGIN_SRC c
+
+  struct buf *bread(dev_t dev, daddr_t blkno)
+  {
+	  register struct buf *bp;
+
+	  bp = getblk(dev, blkno);
+
+	  if (bp->b_flags&B_DONE) {
+		  return bp;
+	  } else {
+		  bp->b_flag |= B_READ;
+		  bp->b_count = BSIZE;
+		  ,*(bdevsw[bmajor(dev)].dstrategy)(bp);
+		  iowait(bp);
+		  return bp;
+	  }
+  }
+
+#+END_SRC
+
+*** getblk
+
+Assigne un tampon à un bloc, si le bloc n'a pas déjà un tampon. Et verrouille le bloc.
+
+[ On va refaire un automate ]
+
+av_forw : LRU
+av_back : MRU
+
+ligne 260 : on écrase tous les flags, et on met B_BUSY
+
+Pour résumer :
+
+On assure que le buffer rendu est bien placé et verrouillé.
+
+[ automate pris en photo, à reprendre en dot ]
+
+*** iowait et iodone
+
+*** bwrite
+
+À écrire nous-même.
+
+#+BEGIN_SRC c
+
+  void bwrite(struct buf *bp)
+  {
+	  bp->b_flags &= ~(B_READ | B_DONE | B_ERROR | B_DELWRI);
+	  bp->b_count = BSIZE;
+
+	  ,*(bdevsw[bmajor(dev)].dstrategy)(bp);
+
+	  if (!(bp->b_flags&B_ASYNC)) {
+		  iowait(bp);
+		  brelse(bp);
+	  }
+
+	  return;
+  }
+
+#+END_SRC
+
+*** brelse
+
+À écrire nous-même
+
+#+BEGIN_SRC c
+
+  void brelse(struct buf *bp)
+  {
+	  int mask;
+
+	  bp->b_flag &= ~(B_BUSY | B_WANTED | B_ASYNC);
+
+	  if (bp->b_flag&B_WANTED) wakeup(bp);
+
+	  if (bfreelist.bflag&B_WANTED) wakeup(&bfreelist);
+
+	  mask = gpl();
+
+	  spl(BDINHB);
+
+	  bfreelist.av_back->av_forw = bp;
+	  bp->av_back = bfreelist.av_back;
+	  bfreelist.av_back = bp;
+	  bp->av_forw = &bfreelist;
+
+	  bfreelist.b_count++;
+
+	  spl(mask);
+  }
+
+#+END_SRC
 
 * Annexes
 
