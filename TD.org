@@ -1679,37 +1679,174 @@ Cette fonction est la boucle principale du processus swapper. Le processus est t
 L'algorithme n'est pas si compliqué que ça, mais il est long. Le plus clair est encore de faire un automate.
 
 
-#+NAME: bonjour
-#+BEGIN_SRC dot :results output verbatim drawer :cmd graph-easy :cmdline --as_ascii
+#+NAME: swapper
+#+BEGIN_SRC dot
 
-  digraph TestGraph1 {
-      rankdir=LR
-      "x" -> "b";
-      "c" -> "b";
-      "b" -> "d";
+  digraph Swapper {
+
+	  node [shape = box];
+
+	  /* Cette option sert à empêcher les courbes */
+	  /* splines = "line"; */
+	  /* Cette option sert à pénaliser les cassures */
+	  /* edge [weight = 1]; */
+
+	  /* Noeuds */
+
+	  subgraph tests
+	  {
+		  loop [label = "loop:"];
+		  finduserswapin [label = "∃ processus prêt\n à rappeler ?"];
+		  corealloc [label = "Assez de mémoire ?"];
+		  finduserswapout1 [label = "∃ processus endormi, non système,\n n'ayant rien verrouillé, à évincer ?"];
+		  userswapinwait [label = "Processus à rappeler\n en swap depuis 3s+ ?"];
+		  finduserswapout2 [label = "∃ processus prêt, non système,\n n'ayant rien verrouillé, en mémoire\n depuis 2s+, à évincer ?"];
+	  }
+
+	  subgraph sleeps
+	  {
+		  sleeprunout [label = "sleep(&runout)"];
+		  wakeupgotoloop [label = "wakeup();goto loop"];
+		  sleeprunin [label = "sleep(&runin)"];
+		  sleeprunout -> wakeupgotoloop [style = dotted];
+		  wakeupgotoloop -> sleeprunin [style = dotted, dir="back"];
+	  }
+
+
+	  subgraph swaps
+	  {
+		  swapinuser [label = "Rappel"];
+		  gotoloop [label = "goto loop"];
+		  swapoutuser [label = "Éviction"];
+		  swapinuser -> gotoloop;
+		  gotoloop -> swapoutuser [dir="back"];
+	  }
+
+	  /* Début */
+	  loop -> finduserswapin;
+
+	  /* Première alternative */
+	  finduserswapin -> sleeprunout [label = "Non"];
+	  finduserswapin -> corealloc [label = "Oui"];
+
+	  /* Deuxième alternative */
+	  corealloc -> swapinuser [label = "Oui"];
+	  corealloc -> finduserswapout1 [label = "Non"];
+
+	  /* Troisième alternative */
+	  finduserswapout1 -> swapoutuser [label = "Oui"];
+	  finduserswapout1 -> userswapinwait [label = "Non"];
+
+	  /* Quatrième alternative */
+	  userswapinwait -> finduserswapout2 [label = "Oui"];
+	  userswapinwait -> sleeprunin [label = "Non"];
+
+	  /* Dernière alternative */
+	  finduserswapout2 -> sleeprunin [label = "Non"];
+	  finduserswapout2 -> swapoutuser [label = "Oui"];
+
+	  /* Forme */
+	  {rank = min; swapinuser gotoloop swapoutuser };
+	  {rank = same; loop finduserswapin corealloc finduserswapout1 userswapinwait finduserswapout2 };
+	  {rank = same; sleeprunout  wakeupgotoloop  sleeprunin };
   }
 
 #+END_SRC
 
 
-#+CALL: bonjour[:results output verbatim drawer :cmd graph-easy :cmdline --as_ascii]()
+#+CALL: swapper[:engine graph-easy :results output verbatim drawer :cmdline --as_boxart]()
 
+#+RESULTS:
+:RESULTS:
+                              ┌−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┐
+                              ╎                  tests                   ╎
+                              ╎                                          ╎
+                              ╎ ┌──────────────────────────────────────┐ ╎
+                              ╎ │                loop:                 │ ╎
+                              ╎ └──────────────────────────────────────┘ ╎
+                              ╎   │                                      ╎
+                              ╎   │                                      ╎
+                              ╎   │                                      ╎
+┌−−−−−−−−−−−−−−−−−−−−┐        ╎   │                                      ╎
+╎       sleeps       ╎        ╎   │                                      ╎
+╎                    ╎        ╎   ▼                                      ╎
+╎ ┌────────────────┐ ╎        ╎ ┌──────────────────────────────────────┐ ╎
+╎ │ sleep(&runout) │ ╎  Non   ╎ │           ∃ processus prêt           │ ╎
+╎ │                │ ╎ ◀───── ╎ │             à rappeler ?             │ ╎
+╎ └────────────────┘ ╎        ╎ └──────────────────────────────────────┘ ╎
+╎   :                ╎        ╎   │                                      ╎
+╎   :                ╎        ╎   │ Oui                                  ╎
+╎   :                ╎        ╎   │                                      ╎
+╎   :                ╎        ╎   │                                      ╎        ┌−−−−−−−−−−−−−−−┐
+╎   :                ╎        ╎   │                                      ╎        ╎     swaps     ╎
+╎   :                ╎        ╎   ▼                                      ╎        ╎               ╎
+╎   :                ╎        ╎ ┌──────────────────────────────────────┐ ╎  Oui   ╎ ┌───────────┐ ╎
+╎   :                ╎        ╎ │          Assez de mémoire ?          │ ╎ ─────▶ ╎ │  Rappel   │ ╎
+╎   :                ╎        ╎ └──────────────────────────────────────┘ ╎        ╎ └───────────┘ ╎
+╎   :                ╎        ╎   │                                      ╎        ╎   │           ╎
+╎   :                ╎        ╎   │ Non                                  ╎        ╎   │           ╎
+╎   :                ╎        ╎   │                                      ╎        ╎   │           ╎
+╎   :                ╎        ╎   │                                      ╎        ╎   │            −−−−−−−−−−−−−−−−−−┐
+╎   :                ╎        ╎   ▼                                      ╎        ╎   ▼                              ╎
+╎   :                ╎        ╎ ┌──────────────────────────────────────┐ ╎        ╎ ┌───────────┐       ┌──────────┐ ╎
+╎   :                ╎        ╎ │  ∃ processus endormi, non système,   │ ╎        ╎ │ goto loop │       │ Éviction │ ╎
+╎   :                ╎        ╎ │ n'ayant rien verrouillé, à évincer ? │ ╎ ─┐     ╎ │           │ ◀──── │          │ ╎ ◀┐
+╎   :                ╎        ╎ └──────────────────────────────────────┘ ╎  │     ╎ └───────────┘       └──────────┘ ╎  │
+╎   :                ╎        ╎   │                                      ╎  │     ╎                                  ╎  │
+╎   :                ╎        ╎   │                                      ╎  │     └−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┘  │
+╎   :                ╎        ╎   │                                      ╎  │      Oui                    ▲             │
+╎   :                ╎        ╎   │ Non                                  ╎  └─────────────────────────────┘             │
+╎   :                ╎        ╎   ▼                                      ╎                                              │
+╎   :                ╎        ╎ ┌──────────────────────────────────────┐ ╎                                              │
+╎   :                ╎        ╎ │         Processus à rappeler         │ ╎                                              │ Oui
+╎   :                ╎        ╎ │         en swap depuis 3s+ ?         │ ╎ ─┐                                           │
+╎   :                ╎        ╎ └──────────────────────────────────────┘ ╎  │                                           │
+╎   :                ╎        ╎   │                                      ╎  │                                           │
+╎   :                ╎        ╎   │ Oui                                  ╎  │                                           │
+╎   :                ╎        ╎   ▼                                      ╎  │                                           │
+╎   :                ╎        ╎ ┌──────────────────────────────────────┐ ╎  │                                           │
+╎   :                ╎        ╎ │    ∃ processus prêt, non système,    │ ╎  │                                           │
+╎   :                ╎        ╎ │ n'ayant rien verrouillé, en mémoire  │ ╎  │                                           │
+╎   :                ╎        ╎ │       depuis 2s+, à évincer ?        │ ╎ ─┼─────  ────────────────────────────────────┘
+╎   :                ╎        ╎ └──────────────────────────────────────┘ ╎  │
+╎   :                ╎        ╎                                          ╎  │
+╎   :                ╎        └−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┘  │
+╎   :                ╎            │                                         │
+╎   :                ╎            │ Non                                     │ Non
+╎   :                ╎            ▼                                         │
+╎   :                 −−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┐  │
+╎   :                                                                    ╎  │
+╎   :                           ┌──────────────────────────────────────┐ ╎  │
+╎   :                           │            sleep(&runin)             │ ╎ ◀┘
+╎   :                           └──────────────────────────────────────┘ ╎
+╎   :                             :                                      ╎
+╎   :                             :                                      ╎
+╎   :                             ▼                                      ╎
+╎   :                           ┌──────────────────────────────────────┐ ╎
+╎   └·························▶ │          wakeup();goto loop          │ ╎
+╎                               └──────────────────────────────────────┘ ╎
+╎                                                                        ╎
+└−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┘
+:END:
 
-Analyse de la fonction :
+#+CALL: swapper[:engine graphviz :file ./TD7/swapper.png :cmdline -Tpng -Grankdir=LR]()
 
-On masque toutes les interruptions.
+#+RESULTS:
+[[file:./TD7/swapper.png]]
 
-On parcourt la table des procs, à la recherche d'un processus prêt. Celui qui a le temps résident en disque le plus long est gardé.
+On se permet aussi de fournir une analyse cursive :
 
-Si on en trouve pas, on s'endort sur la variable runout.
+La fonction masque toutes les interruptions.
 
+La recherche d'un éventuel processus *prêt* à rappeler se fait par le parcours de la tables des processus. Celui qui a le temps résident en disque le plus long est gardé.
 
-Ligne 58 : est-ce que le processus a une structure texte.
-Ligne 59 : est-ce que la structure texte du processus est référencée et chargée en mémoire ?
+Si on en trouve pas, on s'endort sur la variable runout. On se réveillera quand un processus se réveille, ou quand un processus se fait évincer par xswap.
 
-Si oui, rien à faire. Sinon, on augmente la taille du processus de la taille de cette structure texte, et on alloue la place que prend cette structure texte.
+Si on en trouve un, on va essayer de le ramener : pour cela, il faut vérifier si il y a assez de place en mémoire centrale. On prend pour cela la taille de l'image mémoire du processus, donnée par p_size, *éventuellement augmentée de la taille du segment texte du processus*. En effet, si ce processus à ramener ne partage son segment de texte avec aucun autre, alors ce dernier n'est pas chargé en mémoire, et il faut le ramener aussi. Sa taille doit donc être prise en compte dans la vérification de ce qu'il reste assez de place.
 
-Si cette allocation fonctionne :
+Inversement, si le segment de texte est déjà chargé, pas besoin de le ramener, donc pas besoin de tenir compte de sa taille lors de la vérification.
+
+Si l'allocation fonctionne :
 
 On charge éventuellement le texte, si il n'est pas déjà chargé.
 On charge les autres structures du processus.
@@ -1720,36 +1857,21 @@ On retourne au début.
 
 Si cette allocation ne fonctionne pas :
 
-On cherche une victime. On regarde si il existe un processus chargé, pas système, pas verrouillé en mémoire, endormi ou stoppé.
+On cherche une victime. On regarde si il existe un processus chargé, non système, qui n'a rien verrouillé, endormi ou stoppé.
 
-Si on en a trouvé un, on le vire de la mémoire vers le swap, et on retourne au début.
+Si on en a trouvé un, on l'évince, et on retourne au début.
 
-Est-ce que le temps résident du processus qu'on veut faire rentrer est moins de trois secondes. Si c'est le cas, on s'endort sur runin (on se réveillera toutes les secondes, ou quand un processus s'endort, et on reviendra au début.)
+Sinon, on vérifie si le temps résident du processus qu'on veut faire rentrer est strictement moins que trois secondes. Si c'est le cas, on s'endort sur runin (on se réveillera toutes les secondes, ou quand un processus s'endort, et on reviendra au début).
 
-Si le temps résident du processus qu'on veut faire rentrer est de plus de trois secondes, on étend la recherche aux processus prêts, et on prend celui dont le temps résident en mémoire est le plus grand. Si le temps résident en mémoire de ce processus est plus de deux secondes, on le vire, sinon on s'endort.
+Si le temps résident du processus qu'on veut faire rentrer est de trois secondes ou plus, on étend la recherche aux processus prêts, et on prend celui dont le temps résident en mémoire est le plus grand. Si le temps résident en mémoire de ce processus est plus de deux secondes, on le vire, sinon on s'endort sur runin (on se réveillera sous les mêmes conditions).
 
-Le processus swapper ne se termine jamais, il ne fait que s'endormir pour laisser la main à d'autres.
+On remarque que le processus swapper, dont le code principal est donné par la fonction sched(), ne se termine jamais. Il ne fait que s'endormir pour laisser la main à d'autres.
 
+*** Les fonctions swap et xswap
 
-On s'intéresse maintenant à la fonction swap.
+La fonction swap est la fonction qui va effectivement faire les entrées/sorties en lecture comme en écriture.
 
-Permet de faire un transfert de la mémoire vers le disque, ou dans l'autre sens.
-Introduction aux entrées-sorties.
-
-Quand on ramène qqch du disque, on le ramène dans le cache tampon.
-
-xswap est forcément de la mémoire vers le disque.
-
-Description de la fonction :
-
-212-215 : ces lignes sont là si ce n'est pas swapper qui a appelé la fonction xswap.
-
-
-
-[il faut être capable de redessiner l'automate. photo et diagramme]
-
-
-
+Les lignes 212-215 sont là si ce n'est pas swapper qui a appelé la fonction xswap. Si c'est bien lui, en effet, il n'a pas besoin de se réveiller lui-même. En revanche, si c'est (par exemple) newproc qui a appelé xswap, alors le swapper doit être réveillé.
 
 *** Exercice type examen
 
@@ -1767,7 +1889,7 @@ La question :
 Dans combien de temps le processus d'indice 3 reviendra en mémoire ?
 Donnez l'état de la table des procs au moment où il revient.
 
-On a besoin de la taille de la mémoire.
+On a besoin de la taille de la mémoire : on peut la déduire de ce qu'elle est pleine, donc de la somme des tailles des processus résidents en mémoire.
 
 | index | pwchan | p_time | p_pri | p_stat | p_flag      | p_size | p_addr (RAM ou SWAP) |
 |-------+--------+--------+-------+--------+-------------+--------+----------------------|
@@ -1922,7 +2044,7 @@ Segments de texte non pris en compte.
 
 **** Question 1
 
-On suppose qu'à t=0 le proc 103 exécute kill(104, SIGUSR1) et entre dans une boucle infinie, d'instructions ne comportant pas d'appel système.
+On suppose qu'à t=0 le proc 103 exécute kill(104, SIGUSR1) et entre dans une boucle infinie d'instructions ne comportant pas d'appel système.
 Montrer que le swapper va se réveiller.
 
 kill la fonction API utilisateur est exécutée, donc le code de kill appel système est exécuté.
@@ -1935,57 +2057,94 @@ Les filtres de priorité sont bien respectés [à spécifier si on veut tous les
 
 **** Question 2
 
-A quelle date 104 va-t-il commencer à s'exécuter pour traiter le signal.
+A quelle date 104 va-t-il commencer à s'exécuter pour traiter le signal ?
 
 On part du principe que le swapper commence à s'exécuter à t=0.
-
 Mémoire occupée : 20 Mémoire totale : 20.
 
-On exécute le code de swapper. On veut faire rentrer.
+Réponse : t = 2 [on refera les calculs pendant les révisions].
+
+On exécute le code de swapper. On veut faire rentrer 104. Sur quelle adresse le swapper s'endort lorsque 104 s'exécute ?
+
+Réponse :
+Sur runin. En effet, pour faire rentrer 104, on a dû évincer 103, qui se trouve donc dans le swap. Mais 103 est toujours prêt, il a très envie d'exécuter sa boucle infinie. 103 veut rentrer, mais il n'y a pas de place pour lui, et personne à évincer immédiatement : le swapper s'endort donc sur runin, d'après le code de sched().
+
+En supposant que la signal SIGUSR1 provoque un calcul de 9 secondes sur le proc 104., combien de temps après l'envoi du signal va se terminer le calcul ?
+
+103 et 104 sont les deux seuls processus qui peuvent être évincés. Toutes les 3 secondes, un des deux peut être évincé au profit de l'autre. On va donc échanger la place dans la mémoire entre 103 et 104 toutes les 3 seconde : donc 104 termine son exécution au plus tôt à 17 secondes.
 
 
-Sur quelle adresse le swapper s'endort lorsque 104 s'exécute.
-
-En supposant que la signal SIGUSR1 provoque un calcul de 9 secondes sur le proc 104., combien de temps après l'envoi du signal va se terminer le calcul.
-
-[ Réponses ]
-t = 2 [ refaire le calculs ]
-On s'endort sur runin.
-
-On échange le place dans la mémoire entre 103 et 104 toutes les 3 seconde : donc 104 termine son exécution au plus tôt à 17 secondes.
 
 * TD 8 : 04/12/2019
 
-Aujourd'hui, le cache tampon (ou cache d'entrée/sortie)
+Aujourd'hui, on traite le buffer cache, ou le cache tampon (plus correctement le cache d'entrées/sorties).
 
-Cache what ? [ Rappeler une bonne définition générale ]
+#+BEGIN_DEFINITION
+Cache
 
-Mémoire qui entretient un certain rapport avec une mémoire d'intérêt plus grande et plus lente.
+Le cache est une mémoire qui entretient un rapport caractéristique constant avec une autre mémoire réputée capable de stocker nos données d'intérêt (ci-après appelée mémoire d'intérêt) :
+- il est (beaucoup) plus petit
+- il est (beaucoup) plus rapide
 
-Aujourd'hui, toute la mémoire non utilisée est utilisée comme cache tampon.
+C'est un concept généralisable : le cache L1 est un cache du cache L2, les caches L1, L2, L3 sont des caches de la mémoire centrale, la mémoire centrale est un cache du disque, le disque local est un cache d'un disque distant, etc...
 
-Cache logiciel : implanté en logiciel [ Bonne définition ]
+Le but du cache est d'accélérer les accès aux données de la mémoire d'intérêt, en en gardant un sous-ensemble réputé, selon les principes de localité (définition plus bas), de probabilité d'accès élevé.
 
-Utilité : Accélérer les accès aux données de la mémoire d'intérêt.
+De cette manière, quand une donnée demandée par le processeur est dans le cache, elle est donnée directement. Sinon, elle est cherchée dans la mémoire d'intérêt.
+#+END_DEFINITION
 
-Algorithme général de fonctionnement du cache :
+#+BEGIN_DEFINITION
+Localité
 
-Est-ce que la donnée est dans le cache, si oui fin.
-Sinon, le cache récupère la donnée de la mémoire d'intérêt.
-On lit.
+Propriété assez générale *des programmes* : si une instruction (respectivement une donnée) a été utilisée par le processeur, les instructions (respectivement les données) proches en adresse ont plus de chance d'être utilisées que des instructions ou données plus lointaines : localité spatiale. Si une instruction (respectivement une donnée) a été juste utilisée par le processeur, elle a davantage de chance d'être réutilisée dans un future proche que dans un futur lointain : localité temporelle.
+#+END_DEFINITION
 
-Pour l'écriture ?
+Le cache étant beaucoup plus petit que la mémoire d'intérêt, il faut donner une stratégie de choix du sous-ensemble mentionné plus haut.
 
-Comment gérer la cohérence entre cache et mémoire ?
-Quelle donnée évincer du cache en cas de remplissage ?
+D'après le principe de localité spatiale, quand on va chercher une donnée dans la mémoire d'intérêt, on en profite pour prendre tout le *bloc* autour de la donnée.
+D'après le principe de localité temportelle, quand on doit évincer un bloc du cache pour le remplacer par celui qu'on est en train de ramener, on prendre celui auquel on a accédé pour la dernière fois il y a le plus longtemps (*LRU, pour Least Recently Used*).
 
-L'écriture suppose aussi la présence d'un bloc du cache, donc suppose éventuellement un accès mémoire pour ramener la mémoire dans le cache, et aussi un autre accès pour répercuter l'écriture.
+Le cache peut être implémenté en matériel ou en logiciel.
+Dans une implémentation matérielle, celle qui se trouve par exemple dans les caches L1, L2, L3, l'ensemble de la stratégie détaillée plus haut est implantée sous forme de fils et de transistors, elle est transparente du point de vue du programmeur système. Cette implémentation en matériel fait d'ailleurs que c'est rarement un vrai LRU qui est implémenté, celui-ci étant beaucoup trop coûteux en matériel et donc en temps d'accès au cache.
+Dans une implémentation logicielle, le cache est une zone blanche sur laquelle le programmeur système est libre de programmer n'importe quelle stratégie. La mémoire centrale est juste une mémoire centrale, elle n'est pas conçue *a priori* pour être le cache d'une autre mémoire (il existe des machines qui n'ont pas de mémoire au-delà de la mémoire centrale). Si il faut faire de cette mémoire un cache d'une autre mémoire, c'est au programmeur système de l'implémenter, parce que ce n'est pas implémenté en matériel.
 
-Concept de localité [ définition à reprendre ]
+La mémoire centrale (physique) dans un noyau va donc se séparer entre les zones allouées aux processus, les zones qui gardent les structures résidentes du système, et la partie qui servira de cache aux mémoires plus lointaines. Cette dernière partie sera le cache tampon, ou le cache d'entrées/sorties. Aujourd'hui, dans un noyau linux récent, toute la mémoire non utilisée est utilisée comme cache tampon.
 
-LRU : On évince la donnée la moins récemment utilisée.
+L'écriture amène aussi d'autres problèmes. Comment gérer la *cohérence* (la notion de cohérence fait l'objet d'une définition plus poussée dans les notes d'ARCHI1) ?
+
+L'écriture semble supposer aussi la présence du bloc mémoire sur lequel on écrit dans le cache, donc suppose éventuellement un accès mémoire pour ramener le bloc d'intérêt dans le cache, et aussi un autre accès pour répercuter l'écriture.
+
+*** Le fonctionnement du cache tampon
+
+On doit pour commencer distinguer entre les blocs de données et en-têtes, ou les métadonnées de ces blocs.
+
+Les blocs de données viennent en quatre types :
+- Les blocs de données brutes
+- Les superblocs : des blocs qui stockent des données sur la partition (début, fin, etc...)
+- Les blocs d'inode
+- Les blocs d'indirection
+
+Les distinctions entre tous ces types de blocs de données seront vues plus en détail lors du TD sur le système de fichiers.
+
+Ces blocs font tous la même taille BSIZE, une taille apparemment donnée à la compilation par un define (disons à tout le moins non modifiable à la volée).
+
+Un bloc de donnée ne saurait exister sans son en-tête : il y a donc toujours autant de blocs de données que d'en-têtes.
+
+La quantité totale de blocs de données peut être soit statique, soit dynamique. Dans unix v6, elle est statique : regardons pour nous en convaincre les lignes 247 à 250, dans la fonction getblk(). Si il n'y a aucun tampon libre, on s'endort et on revient au début de la boucle principale. Apparemment, dans linux, le cache tampon pouvant s'étendre à toute la place libre dans la mémoire, il doit bien y avoir la possibilité de faire croître et décroître le nombre de blocs et d'en-têtes avec cette mémoire libre. Les structures dans lesquelles sont stockés et les blocs et les en-têtes permettent a priori cette dynamicité.
+
+
+
+
+
+
 
 *** La structure buf
+
+
+
+Avant toute chose, le fonctionnement de la structure buf :
+
+
 
 On a deux chaînes de blocs doublement chaînés.
 
@@ -2114,6 +2273,7 @@ On assure que le buffer rendu est bien placé et verrouillé.
   }
 
 #+END_SRC
+
 
 * Annexes
 
