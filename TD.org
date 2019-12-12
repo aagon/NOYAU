@@ -2275,6 +2275,150 @@ On assure que le buffer rendu est bien placé et verrouillé.
 #+END_SRC
 
 
+* TD 9 : 11/12/2019
+
+Cette semaine, le fonctionnement du système de fichiers.
+
+*** Question 1
+
+#+BEGIN_SRC c
+  #include <stdio.h>
+
+  #include <unistd.h>
+
+  #include <sys/types.h>
+  #include <sys/stat.h>
+  #include <fcntl.h>
+
+  int main(int argc, char *argv[])
+  {
+	  int fd = open(argv[1], O_RDONLY);
+
+	  // Ici tester l'erreur
+
+	  char buf;
+
+	  while (read(fd, &buf, 1) > 0) {
+		  printf("%c", buf);
+	  }
+
+	  close(fd);
+	  return 0;
+  }
+#+END_SRC
+
+Le fd, le descripteur de fichier, est l'entier qui est l'index dans la table des fichiers ouverts.
+
+0, 1 et 2 sont réservés à l'entrée standard, la sortie standard et la sortie d'erreur.
+
+La structure file :
+
+Une table globale du système. Table des ouvertures de fichiers.
+
+[à reprendre]
+
+
+
+On regarde inode.h, l'implémentation unix v6.
+
+
+On a une table statique des inodes en train d'être utilisés.
+
+Lien physique vs lien symbolique.
+
+Une inode n'est supprimée que quand la dernière référence (le dernier lien physique) vers cette inode est supprimée : quand i_nlink tombe à 0.
+
+
+Le lien entre l'inode et le disque :
+
+Organisation du système de fichiers :
+
+Les blocs sont numérotés.
+
+Le premier bloc est le boot bloc.
+
+Ensuite on a un superbloc, qui stocke les métadonnées de l'ensemble des blocs.
+
+Ensuite on a des blocs des inodes.
+
+Puis les blocs de données.
+
+
+La limite entre toutes ces zones de blocs est donnée dans le superbloc.
+
+
+
+La table des inodes en mémoire centrale est un sous-ensemble des inodes stockées sur le disque.
+
+Un répertoire est juste un fichier texte qui stocke des noms de fichiers et les associe à des inodes : c'est donc tout petit, quelques dizaines d'octets.
+
+*** Exercice type examen
+
+#+BEGIN_SRC c
+  // Processus A
+
+  fd = open("f", OWRONLY);
+  write(fd, "aaa", 3);
+  write(fd, "c", 1);
+
+  // Processus B
+
+  fd = open("f", OWRONLY);
+  write(fd,, "bb", 3);
+#+END_SRC
+
+On a bien, dans chacune des structures des fichiers ouverts, une référence vers une entrée *distincte* de la table globale des fichiers ouverts.
+
+Ces deux entrées de la table globale des fichiers ouverts pointent par contre sur la même inode.
+
+Chacun a son propre offset :
+
+Si A écrit tout, puis B
+bbac
+
+Si A écrit aaa, puis B, puis re-a :
+bbac
+
+Si B écrit, puis A :
+aaac
+
+*** Autre exercice type examen
+
+#+BEGIN_SRC c
+
+  fd = open("f", OWRONLY);
+  write(fd, "aaa", 3);
+  if (fork() == 0)
+	  write(fd,"bb",2);
+  else
+	  write(fd,"c",1);
+
+#+END_SRC
+
+Cette fois-ci, le père et le fils partagent la référence à l'entrée dans la table centrale des ouvertures de fichier, et partagent donc l'offset.
+
+Donc deux possibilités :
+aaabbc
+aaacbb
+
+*** Analyse de la fonction iget
+
+ligne 44 : +31 pour se débarrasser du boot bloc et du superbloc.
+16 inodes par blocs.
+
+
+[aparté sur iupdat, code du Lions]
+
+*** Analyse de la structure filsys
+
+*** Analyses des fonctions
+
+schéma de open
+namei [très long, à reprendre]
+close
+unlink
+
+
 * Annexes
 
 Les supports de TD :
