@@ -2118,13 +2118,12 @@ L'écriture semble supposer aussi la présence du bloc mémoire sur lequel on é
 
 On doit pour commencer distinguer entre les blocs de données et en-têtes, ou les métadonnées de ces blocs.
 
-Les blocs de données viennent en quatre types :
-- Les blocs de données brutes
+Les blocs de données viennent en trois types :
+- Les blocs de données (qui se distinguent entre blocs d'intérêt et blocs d'indirection)
 - Les superblocs : des blocs qui stockent des données sur la partition (début, fin, etc...)
 - Les blocs d'inode
-- Les blocs d'indirection
 
-Les distinctions entre tous ces types de blocs de données seront vues plus en détail lors du TD sur le système de fichiers.
+Les distinctions entre tous ces types de blocs de données seront vues plus en détail lors du TD sur le système de fichiers, soit le TD 9.
 
 Ces blocs font tous la même taille BSIZE, une taille apparemment donnée à la compilation par un define (disons à tout le moins non modifiable à la volée).
 
@@ -2132,40 +2131,73 @@ Un bloc de donnée ne saurait exister sans son en-tête : il y a donc toujours a
 
 La quantité totale de blocs de données peut être soit statique, soit dynamique. Dans unix v6, elle est statique : regardons pour nous en convaincre les lignes 247 à 250, dans la fonction getblk(). Si il n'y a aucun tampon libre, on s'endort et on revient au début de la boucle principale. Apparemment, dans linux, le cache tampon pouvant s'étendre à toute la place libre dans la mémoire, il doit bien y avoir la possibilité de faire croître et décroître le nombre de blocs et d'en-têtes avec cette mémoire libre. Les structures dans lesquelles sont stockés et les blocs et les en-têtes permettent a priori cette dynamicité.
 
+Un bloc de données du cache d'entrée/sortie correspond à un bloc du disque : un disque n'est qu'une suite de blocs ordonnés et numérotés.
 
+#+BEGIN_THEOREM
+Lemme
 
+Le processus ne connaît ni ne considère que la mémoire centrale. Il ne connaît pas les autres périphériques, ni les autres processeurs.
+#+END_THEOREM
 
+#+BEGIN_THEOREM
+Corollaire
 
+Le processeur n'écrit jamais sur le disque, il écrit dans le cache d'entrées/sorties de la mémoire centrale.
+#+END_THEOREM
 
+L'entrée/sortie sur un bloc précis supposant la présence de ce bloc dans le cache tampon, il faut être capable de vite savoir si la version cachée du bloc disque se trouve bien dans la mémoire centrale, et vite l'identifier le cas échéant.
+
+Cette vitesse doit être assez indépendante du nombre de blocs de données dans le cache d'entrées/sorties : dans un premier temps (unix v6), le nombre de blocs de données dans le cache d'E/S est statique, mais on l'a vu, on voudrait assez vite le faire bouger avec la mémoire libre.
+
+La technique qui a été retenue est celle de la table de hachage. L'identifiant de chaque bloc de donnée (et donc et surtout de chaque en-tête, ceux-ci et ceux-là correspondant exactement), donnée par la concaténation du numéro de device et du numéro de bloc est haché par une fonction qui s'efforce de respecter une propriété importante : pas ou très peu de collisions entre des blocs proches les uns des autres.
+
+On entrevoit maitenant comment sera organisé le cache tampon :
+
+Les en-têtes des blocs présents dans le cache tampon sont gardés dans une table de hachage qui va bien. La table de hachage, si besoin est de le rappeler, est un tableau de listes chaînées. Le congruent du haché modulo le nombre d'éléments du tableau moins 1 donne l'index de la liste chaînée dans laquelle stocker l'en-tête. Dans notre cas précis, les listes sont doublement chaînées, de manière circulaire (jamais de pointeur vers NULL, on revient au début de la liste).
+
+Le cache tampon étant un cache, il doit disposer d'une stratégie de remplacement : le LRU qui est choisi est implémenté par une autre liste doublement chaînée circulaire. Cette nouvelle liste a toujours un en-tête spécial (il ne fait référence à aucun bloc de données) en son début, qui pointe doublement vers lui-même si la liste est vide. Ce bloc s'appelle bfreelist (ligne 60 du fichier buf.h).
+
+Le LRU est implémenté par un mécanisme très simple : les en-têtes correspondant aux blocs qui cessent d'être utilisés rentrent toujours en un côté de bfreelist, les en-têtes correspondant aux blocs qu'on veut attribuer sont toujours pris de l'autre côté.
+
+Dans chaque en-tête se trouve bien entendu un pointeur vers le bloc (c'est l'union des lignes 25 à 30).
+
+Le tableau qui forme la base de la table de hachage est un tableau d'une structure plus simple, la structure hbuf définie entre les lignes 72 et 77.
+
+Les blocs sont gardés de manière contigüe : chaque bloc est assimilé à un tableau de BSIZE caractères, soit exactement BSIZE octets, et ces tableaux sont eux-mêmes dans un tableau de taille statique (NBUF, quantité obtenue par macro substitution, présente dans le Lions à la page 71, ligne 4720).
+
+Le tableau que Pierre Sens appelle bdevsw[] dans cette image :
+
+[[./TD8/cacheES.jpg][Le cache d'entrées/sorties selon Pierre Sens]]
+
+S'appelle en réalité hbuf[] dans notre code. On a bien un double chaînage circulaire pour les chaînes horizontales (on devrait avoir une double flèche des deux derniers en-tête à droite vers l'entrée de hbuf[]).
+
+Le lien entre l'entrée de hbuf[] et le premier en-tête devrait aussi être double.
+
+bfreelist a bien deux pointeurs qu'on ne voit pas ici, un allant de chaque côté d'un "collier" d'en-têtes disponibles.
 
 *** La structure buf
 
+Le chaînage "horizontal", qui part de hbuf[], est fourni grâce aux pointeurs b_forw et b_back.
 
+Le chaînage "vertical", qui part de bfreelist, est fourni grâce aux pointeurs av_forw et av_back.
 
-Avant toute chose, le fonctionnement de la structure buf :
+b_dev est l'identifiant du matériel : c'est un entier, qui est en fait un vecteur de bits. Ce vecteur est séparé entre les bits de poids fort, qui identifient le pilote, et les bits de poids faible qui permettent d'identifier le numéro de périphérique que ce pilote permet d'utiliser (il arrivait, et il arrive peut-être toujours, qu'un pilote permette d'utiliser plusieurs périphériques, ce qui explique cette association contre-intuitive).
 
+b_count donne la quantité de données qui restent à transférer vers ou depuis le périphérique : quand cette quantité tombe à zéro, cela signifie la fin de l'entrée/sortie.
 
+b_blkno correspond au numéro de bloc dans le périphérique.
 
-On a deux chaînes de blocs doublement chaînés.
+b_flags stocke des informations sur le bloc et sur l'entrée/sortie en cours.
 
-b_dev : identifiant du matériel : un entier, vecteur de bits. Bits de poids fort donnent l'indentifiant du driver : code très bas niveau qui va permettre d'utiliser le périphérique, bits de poids faible donnent le numéro de device qu'on veut utiliser avec ce driver.
+*** La fonction d'entrée/sortie
 
-b_count : nombre de données qui restent à transférer vers ou depuis le device : 0 égale fin d'entrée/sortie.
+Il y a une couche d'abstraction entre le noyau et les pilotes des périphériques, qui peuvent bien ne pas avoir été écrit par les mêmes personnes.
 
-buffers sont les données du cache (type un peu spécial, à reprendre)
+Il existe en mémoire centrale des tables de structures, cdevsw et bdevsw, qui ne contiennent que des pointeurs de fonctions qui sont les pilotes.
 
-b_blkno : numéro de bloc dans le device
+Les seules exigences posées par le noyau sur les pilotes est qu'ils doivent être capable de copier un bloc de la mémoire vers le périphérique, ou vice versa, pourvu qu'on leur donne l'identifiant exact du bloc dans le périphérique et l'adresse physique exacte de l'endroit où le copier en mémoire.
 
-
-Organisé en table de hachage.
-
-[ reprendre le dessin ]
-
-
-
-Les drivers doivent pouvoir ouvrir 
-
-Une fonction d'entrée/sortie doit avoir un device, et une structure buf *préparée*.
+Une fonction d'entrée/sortie du noyau ressemblera donc à ça :
 
 #+BEGIN_SRC c
   doIO(device device, struct buf *buffer)
@@ -2174,8 +2206,15 @@ Une fonction d'entrée/sortie doit avoir un device, et une structure buf *prépa
   }
 #+END_SRC
 
+Cette fonction prend en paramètre un périphérique, et une structure buf *préparée*.
+
+Par contre, partir du principe que c'est la fonction pointée par d_strategy qui va à partir de l'en-tête trouver toute seule comme une grande et l'identifiant du bloc sur le périphérique et le bloc dans la mémoire me semble fantaisiste.
+
+Si les pilotes ne dépendent pas du noyau, c'est à mon avis bien à cette fonction d'enveloppe doIO d'aller chercher les informations idoines (soient, pour ceux qui ont suivi, le numéro du bloc dans le périphérique, et l'adresse du bloc dans la mémoire centrale) dans la struct buf passée en paramètre, pour les passer à son tour à la fonction pointée par d_strategy.
 
 *** bread
+
+Cette fonction est censée rendre un pointeur vers une structure buf, structure buf qui doit avoir un pointeur vers un bloc du cache d'entrée/sortie qui correspond bien au bloc du numéro et du périphérique passé en paramètre.
 
 On doit écrire cette fonction.
 
@@ -2187,41 +2226,215 @@ On doit écrire cette fonction.
 
 	  bp = getblk(dev, blkno);
 
-	  if (bp->b_flags&B_DONE) {
-		  return bp;
-	  } else {
-		  bp->b_flag |= B_READ;
-		  bp->b_count = BSIZE;
-		  ,*(bdevsw[bmajor(dev)].dstrategy)(bp);
-		  iowait(bp);
-		  return bp;
-	  }
+	  if (bp->b_flags&B_DONE) return bp;
+
+	  bp->b_flag |= B_READ;
+	  bp->b_count = BSIZE;
+	  ,*(bdevsw[bmajor(dev)].dstrategy)(bp);
+	  iowait(bp);
+	  return bp;
   }
 
 #+END_SRC
 
-*** getblk
+*** Analyse de la fonction getblk
 
-Assigne un tampon à un bloc, si le bloc n'a pas déjà un tampon. Et verrouille le bloc.
+Cette fonction n'est pas forcément compliquée, mais on va faire un automate :
 
-[ On va refaire un automate ]
+#+NAME: getblk
+#+BEGIN_SRC dot
 
-av_forw : LRU
-av_back : MRU
+  digraph getblk {
 
-ligne 260 : on écrase tous les flags, et on met B_BUSY
+	  node [shape = box];
 
-Pour résumer :
+	  /* Cette option sert à empêcher les courbes */
+	  graph [nodesep = 0.2];
 
-On assure que le buffer rendu est bien placé et verrouillé.
+	  /* Noeuds */
 
-[ automate pris en photo, à reprendre en dot ]
+	  subgraph nominal
+	  {
+		  loop [label = "loop:"];
+		  headerincache [label = "∃ en-tête corr.\n dans le cache E/S ?"];
+		  headeroccupied [label = "Occupé ?"];
+		  lockheader [label = "Verrouillage"];
+		  end [label = "Fin\nPointeur rendu"];
+
+		  loop -> headerincache;
+		  headerincache -> headeroccupied [label = "Oui"];
+		  headeroccupied -> lockheader [label = "Non"];
+		  lockheader -> end;
+	  }
+
+	  subgraph presentoccupied
+	  {
+		  sleepheader [label = "sleep(bp)"];
+	  }
+
+	  subgraph absent
+	  {
+		  emptybfreelist [label = "bfreelist vide ?"];
+		  sleepbfreelist [label = "sleep(&bfreelist)"];
+		  lockheaderunfree [label = "En-tête libre verrouillé,\nsorti de la bfreelist"];
+		  dirty [label = "Bloc dirty ?"];
+		  IO [label = "Faire I/O\n différée"];
+		  updateheader [label = "Mise à jour en-tête"];
+		  gotoloop [label = "goto loop"];
+
+		  sleepbfreelist -> emptybfreelist [label = "Oui", dir="back"];
+
+		  emptybfreelist -> lockheaderunfree [label = "Non"];
+		  lockheaderunfree -> dirty;
+		  dirty -> IO [label = "Oui"];
+		  dirty -> updateheader [label = "Non"];
+		  IO -> gotoloop;
+	  }
+
+	  /* Réveil, retour au début */
+	  sleepbfreelist -> loop [style = dotted, label = "wakeup();goto loop"];
+	  sleepheader -> loop [style = dotted, label = "wakeup();goto loop"];
+
+
+	  /* Première alternative manquée */
+	  headerincache -> emptybfreelist [label = "Non"];
+
+	  /* Deuxième alternative réussie */
+	  headeroccupied -> sleepheader [label = "Oui"];
+
+	  /* En-tête modifiée, fin */
+	  updateheader -> end;
+
+	  // /* Forme */
+	  {rank = min; sleepbfreelist emptybfreelist lockheaderunfree dirty IO gotoloop };
+	  {rank = same; loop headerincache headeroccupied lockheader end };
+	  {rank = max; sleepheader };
+  }
+
+#+END_SRC
+
+#+CALL: getblk[:engine graph-easy :results output verbatim drawer :cmdline --as_boxart]()
+
+#+RESULTS:
+:RESULTS:
+                                                                ┌−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┐
+                                                                ╎            nominal            ╎
+                                                                ╎                               ╎
+                    wakeup();goto loop                          ╎ ┌───────────────────────────┐ ╎  wakeup();goto loop
+    ┌·························································▶ ╎ │           loop:           │ ╎ ◀·······················┐
+    :                                                           ╎ └───────────────────────────┘ ╎                         :
+    :                                                           ╎   │                           ╎                         :
+    :                                                           ╎   │                           ╎                         :
+    :                                                           ╎   │                           ╎                         :
+┌−−−−−−−−−−−−−−−−−−−┐        ┌−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−    │                           ╎                         :
+╎  presentoccupied  ╎        ╎                                      │                           ╎                         :
+╎                   ╎        ╎                                      ▼                           ╎                         :
+╎ ┌───────────────┐ ╎        ╎ ┌─────────────────────┐            ┌───────────────────────────┐ ╎                         :
+╎ │   sleep(bp)   │ ╎  Oui   ╎ │      Occupé ?       │   Oui      │      ∃ en-tête corr.      │ ╎                         :
+╎ │               │ ╎ ◀───── ╎ │                     │ ◀───────── │    dans le cache E/S ?    │ ╎                         :
+╎ └───────────────┘ ╎        ╎ └─────────────────────┘            └───────────────────────────┘ ╎                         :
+╎                   ╎        ╎   │                                                              ╎                         :
+└−−−−−−−−−−−−−−−−−−−┘        ╎   │                      −−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┘                         :
+                             ╎   │                     ╎            │                                                     :
+                             ╎   │ Non                 ╎            │ Non                                                 :
+                             ╎   │                     ╎            ▼                                                     :
+                             ╎   │                     ╎        ┌−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┐
+                             ╎   │                     ╎        ╎                                        absent                               ╎
+                             ╎   ▼                     ╎        ╎                                                                             ╎
+                             ╎ ┌─────────────────────┐ ╎        ╎ ┌───────────────────────────┐   Oui                   ┌───────────────────┐ ╎
+                             ╎ │    Verrouillage     │ ╎        ╎ │     bfreelist vide ?      │ ──────────────────────▶ │ sleep(&bfreelist) │ ╎
+                             ╎ └─────────────────────┘ ╎        ╎ └───────────────────────────┘                         └───────────────────┘ ╎
+                             ╎   │                     ╎        ╎   │                                                                         ╎
+                             ╎   │                     ╎        ╎   │                            −−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┘
+                             ╎   │                     ╎        ╎   │                           ╎
+                             ╎   │                     ╎        ╎   │ Non                       ╎
+                             ╎   ▼                     ╎        ╎   ▼                           ╎
+                             ╎ ┌─────────────────────┐ ╎        ╎ ┌───────────────────────────┐ ╎
+                             ╎ │         Fin         │ ╎        ╎ │ En-tête libre verrouillé, │ ╎
+                             ╎ │   Pointeur rendu    │ ╎        ╎ │   sorti de la bfreelist   │ ╎
+                             ╎ └─────────────────────┘ ╎        ╎ └───────────────────────────┘ ╎
+                             ╎                         ╎        ╎   │                           ╎
+                             └−−−−−−−−−−−−−−−−−−−−−−−−−┘        ╎   │                           ╎
+                                 ▲                              ╎   │                           ╎
+                                 │                              ╎   │                           ╎
+                                 │                              ╎   │                           ╎
+                             ┌−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−    │                           ╎
+                             ╎                                      ▼                           ╎
+                             ╎ ┌─────────────────────┐   Non      ┌───────────────────────────┐ ╎
+                             ╎ │ Mise à jour en-tête │ ◀───────── │       Bloc dirty ?        │ ╎
+                             ╎ └─────────────────────┘            └───────────────────────────┘ ╎
+                             ╎                                      │                           ╎
+                             └−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−    │                           ╎
+                                                                ╎   │                           ╎
+                                                                ╎   │ Oui                       ╎
+                                                                ╎   ▼                           ╎
+                                                                ╎ ┌───────────────────────────┐ ╎
+                                                                ╎ │         Faire I/O         │ ╎
+                                                                ╎ │         différée          │ ╎
+                                                                ╎ └───────────────────────────┘ ╎
+                                                                ╎   │                           ╎
+                                                                ╎   │                           ╎
+                                                                ╎   ▼                           ╎
+                                                                ╎ ┌───────────────────────────┐ ╎
+                                                                ╎ │         goto loop         │ ╎
+                                                                ╎ └───────────────────────────┘ ╎
+                                                                ╎                               ╎
+                                                                └−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┘
+:END:
+
+#+CALL: getblk[:engine graphviz :file ./TD8/getblk.png :cmdline -Tpng -Grankdir=LR]()
+
+#+RESULTS:
+[[file:./TD8/getblk.png]]
+
+
+On l'aura compris, le but de cette fonction est de fournir un en-tête de bloc, soit en le trouvant directement dans les en-têtes de bloc déjà chargés et libres, soit en attendant sa libération le cas échéant, soit en allouant un nouveau bloc le cas échéant. L'en-tête de bloc dont un pointeur est fourni en retour de fonction est bien entendu verrouillé.
+
+En plus de l'automate, on va en plus donner une lecture cursive de la fonction :
+
+La fonction prend en paramètres un entier correspondant au périphérique, et un autre entier correspondant au numéro du bloc.
+
+La boucle commence par un masquage des interruptions de niveau NORMAL.
+
+La fonction calcule le haché de la concaténation périphérique + bloc, et donc son congruent modulo le nombre des éléments de hbuf[] moins 1.
+
+À ce moment, le pointeur dp tient une adresse d'un élément de hbuf[] (on prend quand même la peine de vérifier les erreurs).
+
+On parcourt la liste doublement chaînée qui commence à l'élément de hbuf[] pointé par dp, à la recherche d'un en-tête dont le numéro de périphérique et de bloc sont les mêmes que ceux passés en paramètres.
+
+Si on en trouve un, et qu'il est libre : on le verrouille et on le retourne.
+
+Si on en trouve un, et qu'il est occupé : on y ajoute le flag B_WANTED, on s'endort sur son adresse, et on se fera réveiller quand il se libèrera. Quand on se réveillera, on recommencera cependant tout au début de la boucle.
+
+Si on en trouve pas, on vérifie que le pointeur av_forw de bfreelist ne pointe pas vers bfreelist. Si c'est le cas, ça signifie qu'il n'y a pas d'en-tête libre. Dans ce cas, on rajoute le flag B_WANTED à bfreelist, on s'endort sur son adresse. On se réveillera quand un en-tête libre se rajoutera. On recommencera cependant tout au début de la boucle.
+
+Si le pointeur av_forw de bfreelist ne pointe pas sur bfreelist, c'est qu'il pointe vers l'en-tête du bloc disponible le moins récemment accédé.
+
+Le LRU, qui est un algorithme en général très coûteux à mettre en place, est ici résolu d'une manière intelligente : tous les en-têtes qui veulent se manifester comme disponibles rentrent du même côté du "collier" : le côté av_back. Parcourir la chaîne en partant du côté av_back revient donc exactement à parcourir tous les en-têtes de blocs disponibles du plus récemment accédé (MRU, Most Recently Used) au moins récemment accédé (LRU, Least Recently Used). Inversement, si on parcourt la chaîne en partant du côté av_forw, on parcourra tous les en-têtes de blocs disponibles du moins récemment accédé (LRU) au plus récemment accédé (MRU).
+
+C'est en revanche un "collier" un peu spécial, dont on peut enlever des "perles" en plein milieu et pas seulement aux extrémités.
+
+Ce premier en-tête du bloc LRU est dans un premier temps verrouillé. Si le flag d'écriture différée est activé, cela signifie que le bloc est dirty et qu'il doit donc être répercuté sur le disque. On fait l'entrée/sortie correspondante, et on recommence au début de la boucle.
+
+Si le flag d'écriture différée n'est pas activé, le bloc est clean, il peut être écrasé sans problèmes. On met donc le flag busy à l'en-tête, on le sort de la chaîne des blocs disponibles (les 6 opérations sur pointeur des lignes 261-266), on peuple la structure avec le numéro de périphérique et de bloc et on retourne enfin le pointeur.
 
 *** iowait et iodone
+
+Ces deux fonctions sont simplement des fonctions d'enveloppe autour de sleep et wakeup respectivement.
+
+Elles prennent toutes deux un pointeur vers un en-tête.
+
+La première doit s'endormir sur l'adresse de l'en-tête tant que celui-ci n'a pas fini son entrée/sortie.
+
+La deuxième doit :
+- Marquer que l'entrée/sortie est terminée
+- Si le flag B_ASYNC est activé, relâcher l'en-tête. Sinon réveiller à l'adresse de l'en-tête.
 
 *** bwrite
 
 À écrire nous-même.
+
+Cette fonction lance une écriture, et se bloque en attendant la fin avant de cette écriture, avant de relâcher l'en-tête, si le flag B_ASYNC est absent. S'il est présent, lance simplement l'écriture.
 
 #+BEGIN_SRC c
 
@@ -2244,21 +2457,24 @@ On assure que le buffer rendu est bien placé et verrouillé.
 
 *** brelse
 
-À écrire nous-même
+À écrire nous-même.
+
+Cette fonction est supposée relâcher un en-tête, en le plaçant dans la liste doublement chaînée des en-têtes libres. Si le bloc était demandé, réveiller sur l'adresse de l'en-tête du bloc. Si il n'y avait aucun bloc libre, réveiller sur l'adresse de bfreelist.
 
 #+BEGIN_SRC c
 
   void brelse(struct buf *bp)
   {
-	  int mask;
-
 	  bp->b_flag &= ~(B_BUSY | B_WANTED | B_ASYNC);
 
 	  if (bp->b_flag&B_WANTED) wakeup(bp);
 
-	  if (bfreelist.bflag&B_WANTED) wakeup(&bfreelist);
+	  if (bfreelist.b_flag&B_WANTED) {
+		  bfreelist.b_flag &= ~B_WANTED;
+		  wakeup(&bfreelist);
+	  }
 
-	  mask = gpl();
+	  int mask = gpl();
 
 	  spl(BDINHB);
 
@@ -2274,38 +2490,72 @@ On assure que le buffer rendu est bien placé et verrouillé.
 
 #+END_SRC
 
+Cette fonction n'implique aucune entrée-sortie.
+
+Elle est appelée soit après que l'entrée-sortie a été complétée, soit avant (si le flag B_DELWRI était à 1) : un en-tête de bloc peut parfaitement être relâché, sans que l'entrée/sortie ait été complétée.
+
+*** Remarques et discussion
+
+Les concepteurs de unix v6 ont très tôt implémenté la possibilité des écritures asynchrones, les entrées/sorties, donc les accès au bus étant coûteux.
+
+Pour cela, deux flags dans l'en-tête ont été mis en place :
+- Le flag B_ASYNC (pour ASYNChronous writing), *qui n'est activé qu'en cas d'écriture*, qui signifie simplement que l'écriture n'est pas bloquante. On n'active le flag B_ASYNC dans un seul cas : juste avant de lancer une écriture, soit expicitement via la fonction bawrite, simple fonction d'enveloppe autour de bwrite, soit quand on tient à utiliser un en-tête disponible via getblk, et que celui-ci est dirty.
+
+- Le flag B_DELWRI (pour DELayed WRIting), qui ne lance pas d'écriture mais qui relâche l'en-tête, et qui dit que cette écriture pourra se permettre d'être lancée seulement quand quelqu'un d'autre voudra utiliser l'en-tête relâchée.
+
+Le flag B_DELWRI est transformé en flag B_ASYNC par getblk à la ligne 256, juste avant de lancer une écriture qui sera donc non-bloquante.
+
+Le chemin d'un en-tête marqué B_DELWRI rejoint donc celui d'un en-tête marqué B_ASYNC : *un en-tête ne saurait cependant avoir les deux flags à la fois* (sauf pendant un très court instant entre la ligne 256 de la fonction getblk, et la première ligne de la fonction bwrite appelée juste après).
+
+On ne doit pas oublier que le cache d'entrées/sorties *est avant tout un cache*. De plus, c'est un *cache unique en son niveau*. Tous les processeurs doivent s'adresser à la mémoire centrale, il n'existe pas plusieurs mémoires centrales entre lesquelles il faudrait assurer la cohérence.
+
+*Un système d'écriture Write Back est donc naturel.*
+
+Il y a bien sûr le problème de la volatilité de la mémoire, qui n'en est un que si on le décide (on peut partir du principe que la machine ne va pas s'arrêter de manière intempestive).
+
+Il peut y avoir aussi le problème d'un débit d'écritures trop grand et trop dispersé en localité : si le débit des écritures dans le cache tampon dépasse pendant un long moment celui du débit des écritures entre la mémoire centrale et les périphériques, les processus se voient endormis, de manière à ce que leurs entrées/sorties dans le cache E/S se font plus rares, le débit retombant à terme vers le débit maximal des entrées/sorties de la mémoire centrale vers les périphériques. Ce problème est mitigé par le fait que le tampon d'entrée/sortie est relativement grand. Le masquage complet du coût des écritures est en fait assez facile à assurer.
+
+C'est pour ces raisons que les écritures seront plus souvent différées qu'immédiates. On peut bien entendu explicitement demander une écriture immédiate quand on le souhaite. Mais il est naturel que les écritures ne soient répercutées qu'une fois que le bloc est réclamé par quelqu'un d'autre.
+
 
 * TD 9 : 11/12/2019
 
-Cette semaine, le fonctionnement du système de fichiers.
+Cette semaine, le fonctionnement du système de fichiers, ses liens avec le cache d'entrée/sortie, et le lien entre les inodes et les chemins du système de fichier.
 
 *** Question 1
 
+Petit entraînement : implémenter cat.
+
 #+BEGIN_SRC c
   #include <stdio.h>
-
+  #include <stdlib.h>
   #include <unistd.h>
-
   #include <sys/types.h>
   #include <sys/stat.h>
   #include <fcntl.h>
 
   int main(int argc, char *argv[])
   {
-	  int fd = open(argv[1], O_RDONLY);
-
-	  // Ici tester l'erreur
-
+	  int fd;
 	  char buf;
 
-	  while (read(fd, &buf, 1) > 0) {
-		  printf("%c", buf);
+	  for (int i = 1; i < argc; ++i) {
+		  if ((fd = open(argv[i], O_RDONLY)) == -1) exit(1);
+
+		  while (read(fd, &buf, 1) > 0) {
+			  printf("%c", buf);
+		  }
+
+		  close(fd);
 	  }
 
-	  close(fd);
 	  return 0;
   }
 #+END_SRC
+
+Sans rigoler, le truc au-dessus est vraiment une implémentation fonctionnelle de cat (mais pas très performante, ni très POSIX). Elle est en fait assez proche des implémentations minimalistes de cat qui ont pu être celles de plan9, par exemple. On pourra consulter certaines implémentations historiques de cette commande fort utile [[https://github.com/pete/cats][ici]].
+
+
 
 Le fd, le descripteur de fichier, est l'entier qui est l'index dans la table des fichiers ouverts.
 
