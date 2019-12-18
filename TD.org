@@ -2555,11 +2555,18 @@ Petit entraînement : implémenter cat.
 
 Sans rigoler, le truc au-dessus est vraiment une implémentation fonctionnelle de cat (mais pas très performante, ni très POSIX). Elle est en fait assez proche des implémentations minimalistes de cat qui ont pu être celles de plan9, par exemple. On pourra consulter certaines implémentations historiques de cette commande fort utile [[https://github.com/pete/cats][ici]].
 
+L'entier fd est le *descripteur de fichier*, qui correspond à un index dans un tableau de pointeurs situé dans la structure user du processus. Ces pointeurs pointent vers des structures file, dont un tableau de taille statique est déclaré dans le zone système de la mémoire centrale.
 
+On a donc une table des ouvertures de fichier à l'échelle du processus, qui est en fait un tableau de pointeurs, vers des éléments d'une table globale du système.
 
-Le fd, le descripteur de fichier, est l'entier qui est l'index dans la table des fichiers ouverts.
+Les index 0, 1 et 2 sont les index de la table des i
 
-0, 1 et 2 sont réservés à l'entrée standard, la sortie standard et la sortie d'erreur.
+la table des ouvertures de fichier par le processus. 0, 1 et 2 sont respectivement réservés à l'entrée standard, la sortie standard et la sortie d'erreur.
+
+*** La structure file
+
+En plus de la table des ouvertures de fichier du processus
+
 
 La structure file :
 
