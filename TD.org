@@ -2676,6 +2676,192 @@ close
 unlink
 
 
+* TD 10 : 18/12/2019
+
+Aujourd'hui, la gestion des blocs de données.
+
+Pour un numéro de fichier, on veut savoir à quel bloc on veut accéder.
+
+La fonction bmap.
+
+Mappe un inode et un numéro de bloc logique à un numéro de bloc physique.
+
+On vérifie que le numéro de bloc logique est bien une quantité positive (sinon erreur).
+
+alloc réserve un bloc random libre sur le device passé en paramètre.
+
+NSHIFT est le log de la taille en octets du bloc.
+
+76-84 : aller chercher le numéro du bloc d'indirection (l'allouer si il ne l'est pas).
+
+
+
+
+Automate :
+
+Est-ce que bn est un bloc direct.
+
+Si oui, est-ce que le bloc pointé est alloué ?
+
+Si non, l'allouer (si on est en écriture) erreur (si on est en lecture, ou si l'allocation ne marche pas), puis le rendre.
+
+Si oui, le rendre.
+
+
+Si bn n'est pas un bloc direct, chercher le niveau d'indirection.
+
+(3, 2, ou 1)
+
+On parcourt chaque niveau d'indirection à la recherche du bon bloc.
+
+
+
+alloc serait appelé seulement depuis cette fonction.
+
+
+Le chaînage intelligent.
+
+Le chaînage est fait au moment du formatage.
+
+Par contre si on perd un chaînage, on perd tout les éléments pointés.
+
+ext1/ext2
+
+
+* Révisions
+
+** Examen réparti de Janvier 2019
+
+*** Question de cours
+
+**** 1
+
+Oui. Le masquage lors d'une interruption disque est de priorité inférieure à celle de l'interruption horloge, qui est la plus grande.
+
+**** 2
+
+Le processus traitera au plus tôt le signal quand il aura le processeur, à la sortie du mode noyau.
+
+**** 3
+
+Oui.
+
+*** Exercice 2
+
+**** 1
+
+C'est le bloc 1000
+
+**** 2
+
+La table des inodes sur disque commence au bloc 2.
+
+Une inode fait 32 octets, un bloc est de 512 octets.
+
+2 ^ 5 et 2 ^ 9.
+
+On peut avoir 2^4 soit 16 inodes par bloc.
+
+Si on admet que les inodes sont stockées dans l'ordre de leur numéro, alors l'inode numéro 20 est dans le bloc 3, et l'inode numéro 30 est dans le bloc 3.
+
+**** 3
+
+État des tables de descripteurs de fichier.
+
+Table du père :
+
+| 0 | ptrstdin  |
+| 1 | ptrstdout |
+| 2 | ptrstderr |
+| 3 | ptrf1     |
+| 4 | ptrf2     |
+
+Table du fils :
+
+| 0 | ptrstdin  |
+| 1 | ptrstdout |
+| 2 | ptrstderr |
+| 3 | ptrf1     |
+| 4 | ptrf2     |
+
+Table du petit-fils :
+
+| 0 | ptrstdin  |
+| 1 | ptrstdout |
+| 2 | ptrstderr |
+| 3 | ptrf1     |
+| 4 | ptrf2     |
+
+Table globale des ouvertures de fichier :
+
+|   |        | f_flags           | f_offset | f_count |
+|---+--------+-------------------+----------+---------|
+|   | stdin  |                   |          |         |
+|   | stdout |                   |          |         |
+|   | stderr |                   |          |         |
+|   | /fich  | O_WRONLY O_APPEND |     5136 |       3 |
+|   | /fich  | O_RDWR            |        0 |       3 |
+
+Tables des inodes :
+
+
+|   |       | i_size | i_count | i_number |
+|---+-------+--------+---------+----------|
+|   | /     |      ? |       ? |       20 |
+|   | /fich |   5136 |       2 |       30 |
+
+**** 4
+
+ligne 2 :
+
+namei() transforme "/" en inode 20.
+On accède à l'inode 20, qui est déjà dans la table des inodes (à l'index 0 par hypothèse) : on accède donc au bloc 3 du disque (plutôt dans la version cache I/O), puisque c'est là que se trouve l'inode.
+
+On accède au premier bloc de données de l'inode 20, soit le bloc 100, à la recherche de la chaîne de caractères "fich". On ne la trouve pas, par hypothèse.
+
+On accède au deuxième bloc de données de l'inode 20, soit le bloc 201, à la recherche de la chaîne de caractères "fich". On la trouve.
+
+On accède à l'inode 30, qui est sur le bloc 3 (déjà chargé)
+
+On ajoute à la table des inodes, à l'index 1, l'inode 30 (elle n'y était pas déjà, par hypothèse). On 
+
+[la suite manque, on complètera]
+
+**** 5
+
+Lors du namei du premier open, on doit accéder au bloc 3.
+
+On vérifie que le bloc 3 est dans les blocs du cache IO, il y est par hypothèse. On sort le bloc 0-3 de la bfreelist, on le réserve : pas d'IO.
+
+On doit accéder au bloc 100. On vérifie qu'il est dans le cache IO (il y est). On sort le bloc 0-100 de la bfreelist, on le réserve : pas d'IO.
+
+On doit accéder au bloc 201. On vérifie qu'il est dans le cache IO (il y est). On sort le bloc 0-201 de la bfreelist, on le réserve : pas d'IO.
+
+On doit accéder au bloc 3 (inode 30) : il est déjà dans le cache IO. On le réserve à nouveau, etc...
+
+Pareil pour la ligne 2.
+
+On doit accéder au bloc 3 (inode 30) : il est déjà dans le cache IO. Réservé à nouveau.
+
+On calcule qu'on doit aller écrire dans le bloc 10.
+
+Or le bloc 10 est un bloc d'indirection simple.
+
+On doit récupérer le bloc 402. Le haché de 402 par 5 est 2. On ramène 0-402 dans le cache IO (IO physique), il est pointé par le 3ème élément de la liste hbuf.
+
+On lit le bloc 402, à la recherche de la première ligne.
+
+On doit ramener le bloc 1000. Il est pas dans le cache IO. Le haché est 0. On le ramène (IO physique), il est pointé par 0-100.
+
+bdwrite(). On écrit dans la version cache IO, et on marque le tampon en dirty : pas d'IO.
+
+bdwrite(). On réécrit dans la version cache IO, et on marque le tampon en dirty : pas d'IO.
+
+4 IO logiques, dont 2 IO physiques.
+
+
+
+
 * Annexes
 
 Les supports de TD :
