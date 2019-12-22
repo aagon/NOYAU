@@ -2559,57 +2559,98 @@ L'entier fd est le *descripteur de fichier*, qui correspond à un index dans un 
 
 On a donc une table des ouvertures de fichier à l'échelle du processus, qui est en fait un tableau de pointeurs, vers des éléments d'une table globale du système.
 
-Les index 0, 1 et 2 sont les index de la table des i
+Les index 0, 1 et 2 sont les index de la table des ouvertures de fichier d'un processus qui correspondent respectivement à l'entrée standard, la sortie standard et la sortie d'erreur.
 
-la table des ouvertures de fichier par le processus. 0, 1 et 2 sont respectivement réservés à l'entrée standard, la sortie standard et la sortie d'erreur.
+On a bien entendu une table des ouvertures de fichier par processus. Pour éviter la redondance des informations, toutes ces tables des ouvertures de fichier se contentent de pointer vers une table globale des ouvertures de fichier.
 
 *** La structure file
 
-En plus de la table des ouvertures de fichier du processus
+Comme on l'a dit, la table des ouvertures de fichier du processus pointe vers une table globale du système, une table de structures file.
 
+À quoi ressemble la structure file ?
 
-La structure file :
+On a dedans f_flag qui est un vecteur de 8 bits, désignant les permissions avec lesquelles a été ouvert le fichier : le bit de poids faible à 1 désigne que la lecture est possible, le bit à gauche du premier dit que l'écriture est possible, le bit encore à gauche dit que le fichier est un tube.
 
-Une table globale du système. Table des ouvertures de fichiers.
+On a ensuite un entier qui compte le nombre de références vers cette structure file. En effet, on a dans l'espace d'adressage d'un nombre inconnu de processus un pointeur vers cette entrée. On doit garder bon compte du nombre de références, car cette quantité est particulièrement difficile et coûteuse à retrouver. Cette donnée est aussi d'intérêt, car c'est elle qui déterminera s'il est possible de faire sortir une entrée de la table des fichier ouverts, qui, on le rappelle, est statique, et dans laquelle les places sont chères.
 
-[à reprendre]
+Ensuite, cette structure stocke un pointeur vers un i-noeud (ou *i-node*, ou encore *inode*), dont on verra l'utilité plus tard.
 
+Enfin, cette structure stocke un entier qui correspond au déplacement du "curseur" depuis le début du fichier.
 
+Il est donc en mémoire centrale une table statique de NFILE (variable probablement définie à la compilation, par macro-substitution) fois cette structure.
 
-On regarde inode.h, l'implémentation unix v6.
+*** La structure inode
 
+Dans les polys de travaux dirigés, la structure inode vient en deux versions, une de la version unixv5 et une de la version unixv6.
 
-On a une table statique des inodes en train d'être utilisés.
+L'inode est l'identifiant unique du fichier dans le système de fichiers, ainsi que ses métadonnées.
 
-Lien physique vs lien symbolique.
+Il en existe une table statique (de taille NINODE) en mémoire centrale. Ce sont les entrées de cette structure qui sont pointées par le champ f_inode de la structure file.
 
-Une inode n'est supprimée que quand la dernière référence (le dernier lien physique) vers cette inode est supprimée : quand i_nlink tombe à 0.
+Bien entendu, il existe surtout des inodes sur le disque où est défini le système de fichier : les inodes étant l'identifiant et les métadonnées du fichier, il est nécessaire que ces inodes soient stockés sur la même mémoire *persistante* que les fichiers dont ils sont les métadonnées.
 
+Les inodes en mémoire centrale représentent donc des fichiers ouverts. La table en mémoire centrale est une espèce de cache de la masse des inodes sur le disque.
 
-Le lien entre l'inode et le disque :
+**** Aparté et teaser : organisation du système de fichiers
 
-Organisation du système de fichiers :
+Dans le système de fichier défini par unix, le format extfs (EXTended File System), les blocs du disque (numérotés) sont organisés de cette façon :
 
-Les blocs sont numérotés.
-
-Le premier bloc est le boot bloc.
-
-Ensuite on a un superbloc, qui stocke les métadonnées de l'ensemble des blocs.
-
-Ensuite on a des blocs des inodes.
-
-Puis les blocs de données.
-
+- le premier bloc du disque est le boot bloc (il est chargé au démarrage de la machine et donne éventuellement l'adresse du code à charger)
+- le deuxième bloc est le superbloc de la première partition. Il stocke les métadonnées de la partition. Il y a autant de superblocs qu'il y a de partitions sur un disque.
+- les blocs suivants sont les blocs d'inodes, qui contiennent donc les métadonnées des fichiers du système. Il y a plusieurs inodes stockés dans un bloc d'inode.
+- les blocs suivants sont les blocs de données, qui contiennent soit des données, soit l'adresse (en numéro de bloc) de données. Dans le deuxième cas, on parlera de *blocs d'indirection*.
 
 La limite entre toutes ces zones de blocs est donnée dans le superbloc.
 
+**** Fin de l'aparté, retour à la structure inode
 
+Puisqu'il existe des inodes stockées en mémoire centrale qui sont un sous-ensemble des inodes en mémoire secondaire, un certain nombre de champs n'auront peut-être de sens que pour une seule version de ces inodes.
 
-La table des inodes en mémoire centrale est un sous-ensemble des inodes stockées sur le disque.
+Cette structure inode stocke avant toute chose un vecteur de bits, les flags ayant diverses significations (i_flag).
 
-Un répertoire est juste un fichier texte qui stocke des noms de fichiers et les associe à des inodes : c'est donc tout petit, quelques dizaines d'octets.
+Elle stocke ensuite un compteur de références, pour les mêmes raisons que la structure file stocke un compteur de références (i_count).
+
+Une donnée qui n'a de sens que si l'inode est en mémoire centrale, le périphérique où réside la version persistante de cette dernière (i_dev).
+
+Une autre donnée qui n'a de sens que si l'inode est en mémoire centrale, le numéro d'inode (pourquoi est-ce que cette donnée n'a de sens qu'en mémoire centrale ? Parce que les inodes étant stockés en mémoire secondaire de manière contigüe, et avec un point de départ connu, un nombre constant constant d'inode pouvant être stockés sur un bloc, l'endroit où on trouve l'inode en mémoire secondaire donne son numéro, et vice et versa) (i_number).
+
+Un autre vecteur de 16 bits, qui stocke à la fois des flags sur le type de fichier et sur les permissions qui y sont associées (i_mode).
+
+Le nombre de liens physiques vers cette inode (i_nlink).
+
+**** Aparté sur les liens physiques et les liens symboliques
+
+Un chemin dans le système de fichier correspond à exactement un inode. La traduction entre le chemin et l'inode est d'ailleurs une opération un peu coûteuse qui est assurée par la fonction namei, qui sera vue plus tard.
+
+Il peut bien entendu y avoir plusieurs chemins (appelés liens) qui mènent à un même inode. On parle dans ce cas de liens physiques.
+
+On prendra bien soin de distinguer ces liens des liens symboliques, *qui sont des fichiers*, qui font donc référence à leur propre inode.
+
+**** Fin de l'aparté
+
+Un entier qui identifie le propriétaire du fichier (i_uid).
+
+Un autre entier qui identifie le groupe du propriétaire du fichier (i_gid).
+
+Un entier qui donne la taille du fichier (i_size).
+
+Et enfin un tableau de numéros de blocs dans lesquels sont stockées les données du fichier.
+
+**** Remarques
+
+L'existence d'un fichier est donnée par l'existence de son inode. Une inode n'a besoin d'exister que si un chemin correspondant à cette inode.
+
+Supprimer un fichier avec la commande shell rm consiste donc en la suppression d'un lien physique vers l'inode vers lequel pointe le lien qu'on supprime.
+
+Un inode est effectivement supprimé quand le dernier lien physique vers cette inode est supprimé, soit quand i_nlink tombe à 0. Retrouver le nombre de liens vers un inode est extrêmement coûteux, c'est pour ça qu'on prend la peine de le stocker.
+
+Un lien symbolique est juste un fichier qui contient simplement l'inode (ou le chemin, ou les deux) d'un autre fichier.
+
+Un répertoire est juste un fichier qui contient simplement l'inode d'autres fichiers, ceux dont son chemin est un préfixe du leur.
 
 *** Exercice type examen
+
+Voilà deux processus, qui exécutent chacun :
 
 #+BEGIN_SRC c
   // Processus A
@@ -2624,20 +2665,29 @@ Un répertoire est juste un fichier texte qui stocke des noms de fichiers et les
   write(fd,, "bb", 3);
 #+END_SRC
 
-On a bien, dans chacune des structures des fichiers ouverts, une référence vers une entrée *distincte* de la table globale des fichiers ouverts.
+Décrire l'état de la table des fichiers ouverts et des inodes, et donner le contenu du fichier f.
 
-Ces deux entrées de la table globale des fichiers ouverts pointent par contre sur la même inode.
+#+BEGIN_THEOREM
+Un appel à open ouvre toujours toujours (sous réserve de réussite, bien entendu) une nouvelle entrée dans la table des ouvertures de fichier, quand bien même deux entrées se trouveraient par là exactement identiques !
+#+END_THEOREM
 
-Chacun a son propre offset :
+#+BEGIN_THEOREM
+Corollaire
 
-Si A écrit tout, puis B
-bbac
+La seule manière dont on pourrait avoir une entrée de la table globale des ouvertures de fichier avec un compteur de références supérieur à 1, c'est le fork.
+#+END_THEOREM
 
-Si A écrit aaa, puis B, puis re-a :
-bbac
+On peut en revanche parfaitement avoir deux entrées de cette table globale des fichiers ouverts qui pointent sur la même entrée de la table des inodes.
 
-Si B écrit, puis A :
-aaac
+Dans notre cas, puisqu'on a une entrée dans la table des ouvertures de fichier par processus, chaque processus écrit en son propre endroit du fichier, déterminé par l'offset de l'entrée.
+
+Plusieurs entrelacements possibles des exécutions :
+
+- Si A écrit tout, puis B : "bbac"
+
+- Si A écrit, puis B, puis A à nouveau : "bbac"
+
+- Si B écrit, puis A : "aaac"
 
 *** Autre exercice type examen
 
@@ -2659,6 +2709,14 @@ aaabbc
 aaacbb
 
 *** Analyse de la fonction iget
+
+La fonction iget prend en paramètre un numéro de périphérique et un numéro d'inode, et renvoie un pointeur vers une structure inode verrouillée.
+
+La fonction est un peu longue, on va faire un automate :
+
+
+
+
 
 ligne 44 : +31 pour se débarrasser du boot bloc et du superbloc.
 16 inodes par blocs.
