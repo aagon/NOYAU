@@ -2714,77 +2714,377 @@ La fonction iget prend en paramètre un numéro de périphérique et un numéro 
 
 La fonction est un peu longue, on va faire un automate :
 
+#+NAME: iget
+#+BEGIN_SRC dot
+
+  digraph iget {
+
+	  node [shape = box];
+
+	  graph [nodesep = 0.2];
+
+	  /* Noeuds */
+
+	  subgraph nominal
+	  {
+		  loop [label = "loop:"];
+		  inodeinmemory [label = "Inode demandée\n en mémoire centrale ?"];
+		  inodememoryfree [label = "Libre ?"];
+		  end [label = "Verrouillage entrée\nRetour pointeur"];
+
+		  loop -> inodeinmemory;
+		  inodeinmemory -> inodememoryfree [label = "Oui"];
+		  inodememoryfree -> end [label = "Oui"];
+	  }
+
+	  subgraph presentoccupied
+	  {
+		  sleepinode [label = "sleep(&inode)"];
+	  }
+
+	  subgraph absent
+	  {
+		  freeroom [label = "∃ entrée libre\n dans la table ?"];
+		  lockentry [label = "Verrouillage\nPeuplement de l'entrée\nE/S, retour pointeur"];
+		  error [label = "Erreur\nRetour d'un pointeur NULL"];
+
+		  freeroom -> lockentry [label = "Oui"];
+	  }
+
+	  /* Réveil, retour au début */
+	  sleepinode -> loop [style = dotted, label = "wakeup;goto(loop)"];
+
+	  /* Première alternative manquée */
+	  inodeinmemory -> freeroom [label = "Non"];
+
+	  /* Deuxième alternative manquée */
+	  freeroom -> error [label = "Non"];
+
+	  /* Troisième alternative manquée */
+	  inodememoryfree -> sleepinode [label = "Non"];
+
+	  /* Forme */
+	  {rank = min; sleepinode };
+	  {rank = same; loop inodeinmemory inodememoryfree end };
+	  {rank = same; freeroom lockentry};
+	  {rank = max; error};
+  }
+
+#+END_SRC
 
 
+#+CALL: iget[:engine graph-easy :results output verbatim drawer :cmdline --as_boxart]()
 
+#+RESULTS:
+:RESULTS:
+                                                                ┌−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┐
+                                                                ╎            nominal            ╎
+                                                                ╎                               ╎
+                    wakeup;goto(loop)                           ╎ ┌───────────────────────────┐ ╎
+    ┌·························································▶ ╎ │           loop:           │ ╎
+    :                                                           ╎ └───────────────────────────┘ ╎
+    :                                                           ╎   │                           ╎
+    :                                                           ╎   │                           ╎
+    :                                                           ╎   │                           ╎
+┌−−−−−−−−−−−−−−−−−−−┐        ┌−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−    │                           ╎
+╎  presentoccupied  ╎        ╎                                      │                           ╎
+╎                   ╎        ╎                                      ▼                           ╎
+╎ ┌───────────────┐ ╎        ╎ ┌─────────────────────┐            ┌───────────────────────────┐ ╎
+╎ │ sleep(&inode) │ ╎  Non   ╎ │       Libre ?       │   Oui      │      Inode demandée       │ ╎
+╎ │               │ ╎ ◀───── ╎ │                     │ ◀───────── │   en mémoire centrale ?   │ ╎
+╎ └───────────────┘ ╎        ╎ └─────────────────────┘            └───────────────────────────┘ ╎
+╎                   ╎        ╎   │                                                              ╎
+└−−−−−−−−−−−−−−−−−−−┘        ╎   │                      −−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┘
+                             ╎   │                     ╎            │
+                             ╎   │ Oui                 ╎            │ Non
+                             ╎   │                     ╎            ▼
+                             ╎   │                     ╎        ┌−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┐
+                             ╎   │                     ╎        ╎                                 absent                            ╎
+                             ╎   ▼                     ╎        ╎                                                                   ╎
+                             ╎ ┌─────────────────────┐ ╎        ╎ ┌───────────────────────────┐          ┌────────────────────────┐ ╎
+                             ╎ │ Verrouillage entrée │ ╎        ╎ │      ∃ entrée libre       │          │      Verrouillage      │ ╎
+                             ╎ │   Retour pointeur   │ ╎        ╎ │      dans la table ?      │   Oui    │ Peuplement de l'entrée │ ╎
+                             ╎ │                     │ ╎        ╎ │                           │ ───────▶ │  E/S, retour pointeur  │ ╎
+                             ╎ └─────────────────────┘ ╎        ╎ └───────────────────────────┘          └────────────────────────┘ ╎
+                             ╎                         ╎        ╎   │                                                               ╎
+                             └−−−−−−−−−−−−−−−−−−−−−−−−−┘        ╎   │                            −−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┘
+                                                                ╎   │                           ╎
+                                                                ╎   │ Non                       ╎
+                                                                ╎   ▼                           ╎
+                                                                ╎ ┌───────────────────────────┐ ╎
+                                                                ╎ │          Erreur           │ ╎
+                                                                ╎ │ Retour d'un pointeur NULL │ ╎
+                                                                ╎ └───────────────────────────┘ ╎
+                                                                ╎                               ╎
+                                                                └−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┘
+:END:
 
-ligne 44 : +31 pour se débarrasser du boot bloc et du superbloc.
-16 inodes par blocs.
+#+CALL: iget[:engine graphviz :file ./TD9/iget.png :cmdline -Tpng -Grankdir=LR]()
 
+#+RESULTS:
+[[file:./TD9/iget.png]]
 
-[aparté sur iupdat, code du Lions]
+En plus de cet automate, on reprend la fonction ligne par ligne :
+
+On déclare dans le registre un pointeur vers une structure inode, et un pointeur vers un entier.
+
+Et dans la pile un pointeur vers un entier.
+
+On initialise la variable globale ip à NULL.
+
+On recherche dans la table des inodes, si une inode correspond à celle qu'on a passé en paramètre (c'est-à-dire dont le numéro de périphérique et le numéro de bloc correspondent). On en profite pour mettre au passage dans ip un pointeur vers la première entrée libre.
+
+Si on trouve l'inode correspondante, on vérifie si elle est libre. Si oui, on la verrouille et on en rend un pointeur. Sinon, on s'endort et on revient au début de la boucle.
+
+Si on est à la fin de la boucle et qu'on a pas trouvé notre inode dans la table en mémoire centrale, deux choix :
+- Soit la variable globale ip contient le pointeur NULL, c'est qu'on a trouvé aucune entrée libre, on rend un pointeur NULL, on positionne une erreur et on sort.
+- Soit la variable globale ip contient bien un pointeur vers une entrée de la table, auquel cas on va aller chercher l'inode dans le système de fichiers.
+
+On peuple l'entrée de la table des inodes, on la verrouille.
+
+On lit le bloc dans lequel est stocké l'inode dans le cache d'entrées/sorties. (il se calcule avec la division entière de la ligne 44 : Division par 16 parce qu'on a 16 inodes par bloc d'inode, et +31 parce que les deux premiers blocs du disque ne sont pas des blocs d'inode, ce sont dans l'ordre le boot bloc et le superbloc de la partition courante).
+
+Si on a une erreur sur l'entrée/sortie, on relâche le tampon et l'entrée dans la table des inodes, et on rend un pointeur NULL.
+
+Si on a pas d'erreur, on positionne un pointeur au début de la version périphérique de l'inode (qu'on obtient avec l'opération de la ligne 55 : 32 soit la taille en octets de l'inode multiplié par la position de l'inode dans le bloc courant, obtenue par le reste de la division du numéro d'inode global par 16, soit le nombre d'inodes du bloc).
+
+On positionne le deuxième pointeur sur la zone à écrire de la mémoire centrale (soit la zone idoine de l'entrée de la table des inodes).
+
+On copie octet par octet entre les deux pointeurs.
+
+On relâche l'en-tête du bloc des inodes.
+
+On retourne le pointeur vers l'entrée de la table des inodes.
+
+*** Analyse des autres fonctions de manipulation d'inode
+
+iput consiste en décrémenter le compteur de références de l'inode.
+Si ce compteur passe à 0 après décrémentation :
+- On vérifie si le nombre de liens physiques vers cet inode est de zéro : si oui, on libère tous les blocs de données qui correspondent à cet inode (itrunc()), et on libère ensuite le bloc d'inode dans le système de fichiers (ifree()).
+- On met à jour l'inode du disque si elle a été modifiée en mémoire centrale (non contradictoire avec la précédente opération : on modifie une zone du disque qui ne stocke plus aucune information pertinente, mais ce n'est pas grave). (iupdate())
+
+Un fichier n'est donc vraiment supprimé que quand : le nombre de liens physiques vers son inode passe à 0 ET sa dernière référence dans la table des ouvertures de fichiers ouverts du système disparaît.
 
 *** Analyse de la structure filsys
 
-*** Analyses des fonctions
+La structure filsys stocke les informations de la partition : c'est le contenu du superbloc.
 
-schéma de open
-namei [très long, à reprendre]
-close
-unlink
+C'est cette structure qui est la base du système de fichiers, l'explication des champs de la structure suppose d'anticiper sur le fonctionnement du système de fichiers sous unix.
 
+Son but est entre autres de donner les numéros des blocs libres, aussi bien des blocs de données que des blocs d'inode.
+
+On ne peut bien entendu pas donner tous les numéros des blocs libres dans un bloc.
+
+La solution passe par le fait de garder un petit nombre d'adresses de blocs libres dans un tableau de taille fixe (en fait deux : un pour les blocs de données, un pour les inodes). Le bloc dont l'adresse est en premier dans le tableau contient les adresses d'autres blocs libres, suffisemment pour remplir le tableau à nouveau. Lorsque ce bloc cesse d'être libre, il faut remplir le tableau du contenu de ce bloc. Lorsqu'on libère un bloc et que le tableau est déjà plein, on stocke toutes les adresses du tableau dans ce bloc, et on met ce bloc en premier dans le tableau. 
+
+Les liaisons originelles sont faites au formatage de la partition.
+
+Ce système, le système de fichiers étendu unix : extfs1 ou ext1, dont le système de fichiers principal sous linux actuel (ext4), est une extension, présente un avantage de taille :
+
+On peut stocker toutes les informations sur les blocs libres d'une partition en un espace constant en la taille de la partition (dans notre cas un superbloc, mais on peut imaginer plusieurs superblocs).
+
+Par contre, si le contenu du premier bloc du tableau est perdu, on perd tout l'espace libre pointé directement et indirectement par ce bloc.
+
+À titre de comparaison, le système de fichier FAT stocke les numéros des blocs libres sous la forme d'un vecteur de bit (deux vecteurs de bits, plus exactement, une principal et un de secours) : si on imagine une taille de bloc de 4Ko, on aura toujours 1/32768 ème du disque qui sera occupé par la première bitmap, et 1/32768 ème du disque par la deuxième. Ça n'est pas énorme, mais ça n'est pas constant en la taille du disque (mais linéaire).
+
+Les fonctions d'allocation et de libération d'un bloc de périphérique devront implémenter ce système de fichiers : elles seront vues à la séance 10.
+
+NOTE : cet algorithme n'est valable que pour les blocs de données. Les blocs d'inode fonctionnent autrement. Le tableau des blocs d'inode vide conserve un certain nombre de blocs d'inode vide, quand celui-ci se vide, il est rempli par recherche linéaire sur l'ensemble des blocs d'inodes vides (fonction ialloc()).
+
+Cet algorithme plus simple est possible pour les inodes parce que :
+- Il y a beaucoup moins de blocs d'inodes que de blocs de données dans une partition
+- Les allocations de bloc d'inode se font beaucoup moins souvent. Si on a 100 entrées dans le tableau des blocs d'inodes et 32 inodes par bloc, on va avoir une recherche linéaire toutes les 3200 créations d'inodes.
+
+Quelles sont donc les informations stockées par ce superbloc ?
+
+Le nombre de blocs d'inodes (donc par extension la limite entre les blocs d'inodes et les blocs de données de la partition). (s_isize)
+
+Le nombre de blocs de la partition (donc par extension la limite entre les blocs de donnée de la partition courante et le superbloc de la partition suivante éventuelle). (s_fsize)
+
+Le nombre d'adresses effectivement libres dans le tableau des adresses de blocs de données libres. (s_nfree)
+
+Le tableau des adresses des blocs de données libres. (s_free)
+
+Le nombre d'adresses effectivement libres dans le tableau des adresses de blocs d'inodes libres. (s_ninode)
+
+Le tableau des adresses des blocs d'inodes libres. (s_inode)
+
+Un verrou pour la manipulation de la liste des blocs de données libres, un autre pour la manipulation de la liste des blocs d'inodes libres. (s_flock et s_ilock respectivement).
+
+Différents flags sur la partition : superbloc modifié (s_fmod), ouverture de la partition en lecture seule (s_ronly).
+
+La date de la dernière modification du superbloc (s_time).
+
+Le nombre total de blocs de données libres (s_tfree) et de blocs d'inodes vides (s_tinode).
+
+"interleave factor" : pas compris
+" " : pas compris non plus
+
+Le nom du système de fichiers (s_fname).
+
+*** Analyse de la fonction namei
+
+Il nous reste une dernière étape : faire le lien entre un nom du système de fichiers (un lien) : /home/toto/test.txt et une inode.
+
+C'est l'utilité de la fonction namei. Le travail de cette fonction est potentiellement long, surtout si le lien est long et passe par de multiples répertoires : elle va avoir besoin de lire le contenu des inodes qui correspondent aux répertoires qu'elle va passer.
+
+La fonction n'est pas très complexe, mais elle est longue.
+
+[éventuel automate]
+
+La permission x (exécutable) sur un répertoire signifie le droit de la traverser (cf. lignes 64-65).
+
+Il y a une erreur aux lignes 95-96 : u.u_offset est un entier long, il est manipulé comme un tableau. L'erreur est résolue en regardant le Lions : dans le Lions, le u.u_offset est bien un tableau statique de deux caractères.
+
+Notons bien qu'un appel à namei implique un appel à iget dans la foulée : voir la ligne 180.
+
+*** Retour aux fonctions d'API pour les E/S
+
+Maintenant que les briques du fonctionnement du système de fichiers sont bien posées, on peut facilement dire ce que font les appels systèmes de manipulation de fichiers :
+
+open va simplement consister en un appel à namei pour faire correspondre le lien physique à un inode et pour verrouiller (le cas échéant, amener en mémoire centrale) l'inode en question (en incrémentant le compteur de références au passage), puis en la création d'une entrée dans la table des ouvertures de fichiers globale du système, et en la création d'un pointeur vers cette entrée dans la structure des ouvertures de fichier du processus (ceci est fait par falloc).
+
+link va créer un lien physique dans le système de fichiers vers un inode, et incrémenter le compteur de liens physiques vers un inode. (c'est l'appel système appelé par la commande shell ln(1))
+
+unlink va supprimer un lien phyisque dans le système de fichiers vers un inode, et décrémenter le compteur de liens physiques vers un inode. (c'est l'appel système appelé par la commande shell rm(1))
+
+close va simplement consister en :
+- Récupérer l'inode qui correspond au descripteur passé en paramètre (en effet, close prend un descripteur de fichiers en paramètre)
+- Appeler iput sur l'inode
+- Supprimer l'entrée de la table des ouvertures de fichier globale du système
+- Supprimer le pointeur de la table des ouvertures de fichier du processus
+
+On comprend maintenant presque toutes les étapes de manipulation des fichiers sous unix. Il reste maintenant à faire le lien entre l'inode et les données du fichier.
 
 * TD 10 : 18/12/2019
 
-Aujourd'hui, la gestion des blocs de données.
+Aujourd'hui, dernière séance, la gestion des blocs de données.
 
-Pour un numéro de fichier, on veut savoir à quel bloc on veut accéder.
+Pour un inode particulier, on a un certain nombre arbitraire de blocs de données (selon la taille du fichier). Comment stocker tous ces blocs de données et les lier à l'inode ?
 
-La fonction bmap.
+La solution qui a été choisie est la suivante : on dispose d'un certain nombre fixé de blocs directs, dont le numéro est donné directement dans l'inode. On a ensuite des blocs d'indirection : un bloc contenant uniquement des adresses d'autres blocs voit son adresse stockée dans l'inode. On peut concevoir plusieurs niveaux d'indirection, soit un bloc qui contient uniquement l'adresse d'autres blocs, qui eux-mêmes..., et ainsi de suite, jusqu'à effectivement stocker les adresses des blocs qui contiennent effectivement les données du fichier.
 
-Mappe un inode et un numéro de bloc logique à un numéro de bloc physique.
+Les blocs directs sont les N premier blocs du tableau des blocs stocké dans la structure inode. Le bloc d'indirection 1 est le N+1 ème bloc, le bloc d'indirection 2 est le N+2 ème bloc, etc... etc...
 
-On vérifie que le numéro de bloc logique est bien une quantité positive (sinon erreur).
+De cette manière, on peut stocker des fichiers de taille très variable, en ayant une taille des métadonnées (soit de l'inode et des blocs indirects) qui soit faible pour les petits fichiers, et qui augmente lentement, et de telle manière que le nombre d'entrées/sorties nécessaires pour accéder au fichier augmente seulement sur des gros fichiers (pour lesquels le nombre d'entrées/sorties sera de toute façon massif).
 
-alloc réserve un bloc random libre sur le device passé en paramètre.
+Pour augmenter la taille maximale d'un fichier dans le système, on peut soit augmenter la taille du bloc, soit augmenter le niveau d'indirection.
 
-NSHIFT est le log de la taille en octets du bloc.
+On doit donc maintenant distinguer deux concepts :
 
-76-84 : aller chercher le numéro du bloc d'indirection (l'allouer si il ne l'est pas).
+#+BEGIN_DEFINITION
+Bloc logique d'un fichier :
 
+Si on conçoit les données d'un fichier comme s'écrivant séquentiellement sur N blocs indépendemment du système de fichiers, alors ces N blocs sont les blocs logiques du fichier, et ils peuvent être numérotés selon l'ordre des données dans le fichier.
 
+Bloc physique d'un fichier :
 
+Le bloc du périphérique qui stocke effectivement partie des données du fichier. N'a pas besoin d'être contigu avec les autres blocs physiques du fichier.
+#+END_DEFINITION
 
-Automate :
+#+BEGIN_THEOREM
+A un bloc logique d'un fichier (le 11ème bloc, ou le bloc 11, par exemple) correspond exactement un bloc physique d'un périphérique (le bloc 57892 du périphérique /dev/sda1).
+#+END_THEOREM
 
-Est-ce que bn est un bloc direct.
+Il faut pouvoir mapper un couple (inode, numéro de bloc logique) à un numéro de bloc physique.
 
-Si oui, est-ce que le bloc pointé est alloué ?
+C'est l'utilité de la fonction bmap, dont on va faire un automate partiel :
 
-Si non, l'allouer (si on est en écriture) erreur (si on est en lecture, ou si l'allocation ne marche pas), puis le rendre.
+#+NAME: bmap
+#+BEGIN_SRC dot
 
-Si oui, le rendre.
+  digraph bmap {
 
+	  node [shape = box];
 
-Si bn n'est pas un bloc direct, chercher le niveau d'indirection.
+	  graph [nodesep = 0.2];
 
-(3, 2, ou 1)
+	  /* Noeuds */
 
-On parcourt chaque niveau d'indirection à la recherche du bon bloc.
+	  subgraph pointed
+	  {
+		  pointedallocated [label = "Bloc pointé alloué"];
+		  flag [label = "Flag ?"];
+		  alloc [label = "Allouer le bloc\net les blocs d'indirection éventuels"];
 
+		  pointedallocated -> flag [label = "Non"];
+		  flag -> alloc [label = "Écriture"];
+	  }
 
+	  return [label = "Rendre le numéro"];
+	  error [label = "Erreur et sortie"];
 
-alloc serait appelé seulement depuis cette fonction.
+	  /* Intergraphes */
+	  pointedallocated -> return [label = "Oui"];
+	  flag -> error [label = "Lecture"];
+	  alloc -> error [label = "Erreur d'allocation"];
+	  alloc -> return [label = "Pas d'erreur"];
 
+	  /* Forme */
+	  {rank = min; error };
+	  {rank = same; pointedallocated flag alloc };
+	  {rank = max; return};
+  }
 
-Le chaînage intelligent.
+#+END_SRC
 
-Le chaînage est fait au moment du formatage.
+#+CALL: bmap[:engine graph-easy :results output verbatim drawer :cmdline --as_boxart]()
 
-Par contre si on perd un chaînage, on perd tout les éléments pointés.
+#+RESULTS:
+:RESULTS:
+                                     ┌−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┐
+                                     ╎                 pointed                  ╎
+                                     ╎                                          ╎
+┌──────────────────┐  Oui            ╎ ┌──────────────────────────────────────┐ ╎
+│ Rendre le numéro │ ◀────────────── ╎ │          Bloc pointé alloué          │ ╎
+└──────────────────┘                 ╎ └──────────────────────────────────────┘ ╎
+  ▲                                  ╎   │                                      ╎
+  │                                  ╎   │ Non                                  ╎
+  │                                  ╎   ▼                                      ╎
+  │                                  ╎ ┌──────────────────────────────────────┐ ╎
+  │                                  ╎ │                Flag ?                │ ╎ ─┐
+  │                                  ╎ └──────────────────────────────────────┘ ╎  │
+  │                                  ╎   │                                      ╎  │
+  │                                  ╎   │ Écriture                             ╎  │
+  │                                  ╎   ▼                                      ╎  │
+  │                                  ╎ ┌──────────────────────────────────────┐ ╎  │
+  │                  Pas d'erreur    ╎ │           Allouer le bloc            │ ╎  │
+  └───────────────────────────────── ╎ │ et les blocs d'indirection éventuels │ ╎  │
+                                     ╎ └──────────────────────────────────────┘ ╎  │ Lecture
+                                     ╎                                          ╎  │
+                                     └−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┘  │
+                                         │                                         │
+                                         │ Erreur d'allocation                     │
+                                         ▼                                         │
+                                       ┌──────────────────────────────────────┐    │
+                                       │           Erreur et sortie           │   ◀┘
+                                       └──────────────────────────────────────┘
+:END:
 
-ext1/ext2
+#+CALL: bmap[:engine graphviz :file ./TD10/bmap.png :cmdline -Tpng -Grankdir=LR]()
 
+#+RESULTS:
+[[file:./TD10/bmap.png]]
+
+Cet automate nous permet déjà de comprendre une chose : on n'alloue de la place à un fichier dans le périphérique qu'à la mesure des informations qu'il porte vraiment. À titre d'exemple, si on décide de créer un fichier vide, d'écrire un caractère dedans, de seek forward un million d'octets et de réécrire un caractère, on n'aura effectivement que deux blocs alloués (si la taille du bloc est inférieure à un million d'octets, bien sûr). Il est donc parfaitement possible de demander l'accès à un bloc qui n'a pas encore été alloué, pourvu qu'on ait le flag en écriture (suppose bien entendu que la fonction alloc n'est appelé que par cette fonction, on croira Jonathan Lejeune sur parole sur ce point-là).
+
+Cet automate ne nous explique en revanche pas comment on fait pour trouver le bon bloc physique qui correspond au bloc logique. Pour cause, l'algorithme est détaillé et un peu obscur.
+
+On retiendra néanmoins : si le bloc demandé est un bloc direct, on pointe vers lui (on l'alloue si besoin est).
+
+Si il n'est pas un bloc direct, on calcule son niveau d'indirection :
+- On lui soustrait le nombre de blocs directs
+- On compare ce nombre à 2^(NSHIFT * i) : si il est plus petit, c'est qu'il y a plus d'adresse de blocs dans l'indirection i que le numéro du bloc qu'on cherche, c'est donc que le bloc qu'on cherche est un bloc d'indirection i. Sinon, on est dans un niveau d'indirection plus haut, on recommence en incrémentant i et en soustrayant 2^(NSHIFT * i) à notre numéro de bloc.
+
+Bien, entendu, on suppose que le nombre d'adresses de blocs écrites sur un bloc d'indirection est une puissance de 2 (trivial à vérifier : une adresse s'écrit sur une quantité entière d'octets, donc sur une puissance de 2 bits, et un bloc est de taille de puissance de 2 octets, donc de puissance de 2 bits).
+
+Puisque le nombre d'adresses dans un bloc d'indirection est une puissance de 2, son log_2 est une quantité entière : c'est la quantité NSHIFT.
+
+A la sortie de la boucle, on a un niveau d'indirection soit trop grand (taille maximale du fichier dépassée), auquel cas erreur, soit à la bonne taille et connu.
+
+Dans ce deuxième cas, on parcourt récursivement les niveaux d'indirection, en allouant les blocs si besoin est.
+
+On retourne le numéro du bloc de physique auquel on arrive.
 
 * Révisions
 
@@ -2802,7 +3102,7 @@ Le processus traitera au plus tôt le signal quand il aura le processeur, à la 
 
 **** 3
 
-Oui.
+Oui : par exemple si il est créé dans le swap.
 
 *** Exercice 2
 
@@ -2816,7 +3116,7 @@ La table des inodes sur disque commence au bloc 2.
 
 Une inode fait 32 octets, un bloc est de 512 octets.
 
-2 ^ 5 et 2 ^ 9.
+2 ^ 5 et 2 ^ 9 respectivement.
 
 On peut avoir 2^4 soit 16 inodes par bloc.
 
@@ -2848,20 +3148,18 @@ Table du petit-fils :
 | 1 | ptrstdout |
 | 2 | ptrstderr |
 | 3 | ptrf1     |
-| 4 | ptrf2     |
 
 Table globale des ouvertures de fichier :
 
-|   |        | f_flags           | f_offset | f_count |
-|---+--------+-------------------+----------+---------|
-|   | stdin  |                   |          |         |
-|   | stdout |                   |          |         |
-|   | stderr |                   |          |         |
-|   | /fich  | O_WRONLY O_APPEND |     5136 |       3 |
-|   | /fich  | O_RDWR            |        0 |       3 |
+|    |        | f_flags      | f_offset | f_count |
+|----+--------+--------------+----------+---------|
+|    | stdin  |              |          |         |
+|    | stdout |              |          |         |
+|    | stderr |              |          |         |
+| f1 | /fich  | FWRITE       |     5136 |       3 |
+| f2 | /fich  | FREAD FWRITE |        0 |       2 |
 
 Tables des inodes :
-
 
 |   |       | i_size | i_count | i_number |
 |---+-------+--------+---------+----------|
@@ -2870,55 +3168,73 @@ Tables des inodes :
 
 **** 4
 
-ligne 2 :
+Blocs du périphérique accédés :
 
-namei() transforme "/" en inode 20.
-On accède à l'inode 20, qui est déjà dans la table des inodes (à l'index 0 par hypothèse) : on accède donc au bloc 3 du disque (plutôt dans la version cache I/O), puisque c'est là que se trouve l'inode.
+namei accède d'abord à l'inode 20, qui est déjà dans la table des inodes par hypothèse.
+On parcourt les blocs de l'inode 20 à la recherche de "/fich" : bloc 100 puis 201. Au bloc 201, on apprend que "/fich" se trouve dans l'inode 30, on va donc chercher le bloc 3 pour ramener l'inode.
 
-On accède au premier bloc de données de l'inode 20, soit le bloc 100, à la recherche de la chaîne de caractères "fich". On ne la trouve pas, par hypothèse.
+Idem pour le open de la ligne 3, sauf qu'on a pas besoin de remettre l'inode 30 dans la table des inodes, elle y est déjà.
 
-On accède au deuxième bloc de données de l'inode 20, soit le bloc 201, à la recherche de la chaîne de caractères "fich". On la trouve.
+Write : l'inode est dans la table des inodes. On doit accéder au dernier bloc, on lit le bloc d'indirection 402, puis le bloc de données 1000.
 
-On accède à l'inode 30, qui est sur le bloc 3 (déjà chargé)
+Write ligne 8 : idem.
 
-On ajoute à la table des inodes, à l'index 1, l'inode 30 (elle n'y était pas déjà, par hypothèse). On 
 
-[la suite manque, on complètera]
+Donc blocs :
+ligne 2 : 100 201 3
+ligne 3 : 100 201
+ligne 5 : 402 1000
+ligne 8 : 402 1000
+
+Donc inodes :
+ligne 2 : 20 30
+ligne 3 : 20 30
+ligne 5 : 30
+ligne 8 : 30
+
 
 **** 5
 
-Lors du namei du premier open, on doit accéder au bloc 3.
+On doit comprendre la consigne de la manière suivante : le buffer cache a une capacité maximale de 4 blocs.
 
-On vérifie que le bloc 3 est dans les blocs du cache IO, il y est par hypothèse. On sort le bloc 0-3 de la bfreelist, on le réserve : pas d'IO.
+Il faut donner l'état de la structure hbuf avec les flags delwri, la bfreelist.
 
-On doit accéder au bloc 100. On vérifie qu'il est dans le cache IO (il y est). On sort le bloc 0-100 de la bfreelist, on le réserve : pas d'IO.
+On se propose de donner la séquence des accès et de la bfreelist *après* chaque accès.
 
-On doit accéder au bloc 201. On vérifie qu'il est dans le cache IO (il y est). On sort le bloc 0-201 de la bfreelist, on le réserve : pas d'IO.
+On ne donnera que l'état final de la structure hbuf avec les flags.
 
-On doit accéder au bloc 3 (inode 30) : il est déjà dans le cache IO. On le réserve à nouveau, etc...
+| Accès                | bfreelist                       |
+|----------------------+---------------------------------|
+| Initial              | 0-201, 0-3, 0-100, 0-4          |
+| Accès 0-100          | 0-201, 0-3, 0-4, 0-100          |
+| Accès 0-201          | 0-3, 0-4, 0-100, 0-201          |
+| Accès 0-3            | 0-4, 0-100, 0-201, 0-3          |
+| Accès 0-100          | 0-4, 0-201, 0-3, 0-100          |
+| Accès 0-201          | 0-4, 0-3, 0-100, 0-201          |
+| Accès 0-402 (E/S !)  | 0-3, 0-100, 0-201, 0-402        |
+| Accès 0-1000 (E/S !) | 0-100, 0-201, 0-402, 0-1000(D)  |
+| Accès 0-402          | 0-100, 0-201, 0-1000(D), 0-402  |
+| Accès 0-1000         | 0-100, 0-201, 0-402, 0-1000(D)  |
 
-Pareil pour la ligne 2.
+État de hbuf :
 
-On doit accéder au bloc 3 (inode 30) : il est déjà dans le cache IO. Réservé à nouveau.
+|---+----+-------+----+-----------|
+| 0 | -> | 0-100 | -> | 0-1000(D) |
+|---+----+-------+----+-----------|
+| 1 | -> | 0-201 |    |           |
+|---+----+-------+----+-----------|
+| 2 | -> | 0-402 |    |           |
+|---+----+-------+----+-----------|
+| 3 |    |       |    |           |
+|---+----+-------+----+-----------|
+| 4 |    |       |    |           |
+|---+----+-------+----+-----------|
 
-On calcule qu'on doit aller écrire dans le bloc 10.
+On compte deux entrées/sorties physiques, sur les blocs 402 et 1000.
 
-Or le bloc 10 est un bloc d'indirection simple.
+Il y aura encore une autre entrée/sortie physique quand 0-1000 se fera évincer du cache d'entrées/sorties (il a le flag DELWRI).
 
-On doit récupérer le bloc 402. Le haché de 402 par 5 est 2. On ramène 0-402 dans le cache IO (IO physique), il est pointé par le 3ème élément de la liste hbuf.
-
-On lit le bloc 402, à la recherche de la première ligne.
-
-On doit ramener le bloc 1000. Il est pas dans le cache IO. Le haché est 0. On le ramène (IO physique), il est pointé par 0-100.
-
-bdwrite(). On écrit dans la version cache IO, et on marque le tampon en dirty : pas d'IO.
-
-bdwrite(). On réécrit dans la version cache IO, et on marque le tampon en dirty : pas d'IO.
-
-4 IO logiques, dont 2 IO physiques.
-
-
-
+Et on compte bien entendu autant d'E/S logiques que d'accès à des blocs, soit 9.
 
 * Annexes
 
