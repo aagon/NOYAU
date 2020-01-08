@@ -2049,30 +2049,171 @@ Montrer que le swapper va se réveiller.
 
 kill la fonction API utilisateur est exécutée, donc le code de kill appel système est exécuté.
 Dans le code de kill, on a un appel à psignal.
-psignal va appeler setrun sur 104
+psignal va appeler setrun sur 104, parce que p->p_pri est de 50, donc bien supérieur à PZERO ([à ne pas oublier de préciser si on veut tous les points]).
 104 n'a pas le flag SLOAD, wakeup est donc appelé sur &runout.
 Or le processus swapper est endormi sur runout. Le processus swapper sera élu lors de la prochaine élection, qui va arriver tout de suite (runrun++).
-
-Les filtres de priorité sont bien respectés [à spécifier si on veut tous les points].
 
 **** Question 2
 
 A quelle date 104 va-t-il commencer à s'exécuter pour traiter le signal ?
 
-On part du principe que le swapper commence à s'exécuter à t=0.
-Mémoire occupée : 20 Mémoire totale : 20.
+On part du principe que le swapper commence à s'exécuter à t=0. Mettons les actions du swapper et les différents états de la mémoire en nous servant de l'automate du swapper :
 
-Réponse : t = 2 [on refera les calculs pendant les révisions].
+t = 0
+Il ne s'est encore rien passé depuis que 103 a envoyé le signal SIGUSR1 à 104
+Mémoire occupée : 20 Mémoire totale : 20.
+| index | p_pid | p_uid | p_flag      | p_stat | p_size | p_time | p_wchan  | p_pri |
+|-------+-------+-------+-------------+--------+--------+--------+----------+-------|
+|     0 |     0 |     0 | SSYS&SLOAD  | SSLEEP |      2 |    120 | runout   | PSWP  |
+|     1 |     1 |     0 | SSYS&SLOAD  | SSLEEP |      4 |    125 | &proc[1] | PWAIT |
+|     2 |   101 |  1000 | SLOAD       | SSLEEP |      1 |      1 | &toto    | 50    |
+|     3 |   102 |  1000 | SLOCK&SLOAD | SSLEEP |      3 |     10 | &toto    | 50    |
+|     4 |   103 |  1000 | SLOAD       | SRUN   |     10 |      0 |          | 50    |
+|     5 |   104 |  1000 | NULL        | SLEEP  |     10 |     10 | &toto    | 50    |
+|     6 |   105 |  1000 | NULL        | SLEEP  |     10 |      5 | &toto    | 50    |
+
+t = 0
+104 passe en mode prêt (grâce à setrun())
+| index | p_pid | p_uid | p_flag      | p_stat | p_size | p_time | p_wchan  | p_pri |
+|-------+-------+-------+-------------+--------+--------+--------+----------+-------|
+|     0 |     0 |     0 | SSYS&SLOAD  | SSLEEP |      2 |    120 | runout   |  PSWP |
+|     1 |     1 |     0 | SSYS&SLOAD  | SSLEEP |      4 |    125 | &proc[1] | PWAIT |
+|     2 |   101 |  1000 | SLOAD       | SSLEEP |      1 |      1 | &toto    |    50 |
+|     3 |   102 |  1000 | SLOCK&SLOAD | SSLEEP |      3 |     10 | &toto    |    50 |
+|     4 |   103 |  1000 | SLOAD       | SRUN   |     10 |      0 |          |    50 |
+|     5 |   104 |  1000 | NULL        | SRUN   |     10 |     10 |          |    50 |
+|     6 |   105 |  1000 | NULL        | SLEEP  |     10 |      5 | &toto    |    50 |
+
+t = 0
+Le swapper se réveille (runrun++) et il passe une première fois
+Processus prêt à rappeler : oui, 104
+Assez de mémoire : besoin de 10, 0 disponible, donc non.
+Processus endormi, non système, n'ayant rien verrouillé candidat à l'éviction ? Oui, 101, que le swapper évince.
+Mémoire occupée : 19 Mémoire totale : 20
+| index | p_pid | p_uid | p_flag      | p_stat | p_size | p_time | p_wchan  | p_pri |
+|-------+-------+-------+-------------+--------+--------+--------+----------+-------|
+|     0 |     0 |     0 | SSYS&SLOAD  | SSLEEP |      2 |    120 | runout   |  PSWP |
+|     1 |     1 |     0 | SSYS&SLOAD  | SSLEEP |      4 |    125 | &proc[1] | PWAIT |
+|     2 |   101 |  1000 | NULL        | SSLEEP |      1 |      0 | &toto    |    50 |
+|     3 |   102 |  1000 | SLOCK&SLOAD | SSLEEP |      3 |     10 | &toto    |    50 |
+|     4 |   103 |  1000 | SLOAD       | SRUN   |     10 |      0 |          |    50 |
+|     5 |   104 |  1000 | NULL        | SRUN   |     10 |     10 |          |    50 |
+|     6 |   105 |  1000 | NULL        | SLEEP  |     10 |      5 | &toto    |    50 |
+
+t = 0
+Le swapper fait son deuxième passage
+Processus prêt à rappeler : oui, 104
+Assez de mémoire : besoin de 10, 1 disponible, donc non.
+Processus endormi, non système, n'ayant rien verrouillé candidat à l'éviction ? Non.
+Processus à rappeler (104 donc) résident en swap depuis plus de 3 secondes. Résident en swap depuis 10 secondes, donc oui.
+Processus prêt, non système, n'ayant rien verrouillé, résident en mémoire depuis 2s ou plus, candidat à l'éviction ? Non, le swapper s'endort sur runin.
+Mémoire occupée : 19 Mémoire totale : 20
+| index | p_pid | p_uid | p_flag      | p_stat | p_size | p_time | p_wchan  | p_pri |
+|-------+-------+-------+-------------+--------+--------+--------+----------+-------|
+|     0 |     0 |     0 | SSYS&SLOAD  | SSLEEP |      2 |    120 | runout   |  PSWP |
+|     1 |     1 |     0 | SSYS&SLOAD  | SSLEEP |      4 |    125 | &proc[1] | PWAIT |
+|     2 |   101 |  1000 | NULL        | SSLEEP |      1 |      0 | &toto    |    50 |
+|     3 |   102 |  1000 | SLOCK&SLOAD | SSLEEP |      3 |     10 | &toto    |    50 |
+|     4 |   103 |  1000 | SLOAD       | SRUN   |     10 |      0 |          |    50 |
+|     5 |   104 |  1000 | NULL        | SRUN   |     10 |     10 |          |    50 |
+|     6 |   105 |  1000 | NULL        | SLEEP  |     10 |      5 | &toto    |    50 |
+
+t = 1
+Le processus 103 spin pendant une seconde entière.
+Le swapper se réveille (une fois par seconde au minimum) et fait son troisième passage.
+Processus prêt à rappeler : oui, 104
+Assez de mémoire : besoin de 10, 1 disponible, donc non.
+Processus endormi, non système, n'ayant rien verrouillé candidat à l'éviction ? Non.
+Processus à rappeler (104 donc) résident en swap depuis plus de 3 secondes. Résident en swap depuis 11 secondes, donc oui.
+Processus prêt, non système, n'ayant rien verrouillé, résident en mémoire depuis 2s ou plus, candidat à l'éviction ? Non, le swapper s'endort sur runin.
+Mémoire occupée : 19 Mémoire totale : 20
+| index | p_pid | p_uid | p_flag      | p_stat | p_size | p_time | p_wchan  | p_pri |
+|-------+-------+-------+-------------+--------+--------+--------+----------+-------|
+|     0 |     0 |     0 | SSYS&SLOAD  | SSLEEP |      2 |    121 | runout   |  PSWP |
+|     1 |     1 |     0 | SSYS&SLOAD  | SSLEEP |      4 |    126 | &proc[1] | PWAIT |
+|     2 |   101 |  1000 | NULL        | SSLEEP |      1 |      1 | &toto    |    50 |
+|     3 |   102 |  1000 | SLOCK&SLOAD | SSLEEP |      3 |     11 | &toto    |    50 |
+|     4 |   103 |  1000 | SLOAD       | SRUN   |     10 |      1 |          |    50 |
+|     5 |   104 |  1000 | NULL        | SRUN   |     10 |     11 |          |    50 |
+|     6 |   105 |  1000 | NULL        | SLEEP  |     10 |      6 | &toto    |    50 |
+
+t = 2
+Le processus 103 spin pendant une seconde entière.
+Le swapper se réveille (une fois par seconde au minimum) et fait son troisième passage.
+Processus prêt à rappeler : oui, 104
+Assez de mémoire : besoin de 10, 1 disponible, donc non.
+Processus endormi, non système, n'ayant rien verrouillé candidat à l'éviction ? Non.
+Processus à rappeler (104 donc) résident en swap depuis plus de 3 secondes. Résident en swap depuis 11 secondes, donc oui.
+Processus prêt, non système, n'ayant rien verrouillé, résident en mémoire depuis 2s ou plus, candidat à l'éviction ? Oui, 103, qui se fait évincer.
+Mémoire occupée : 9 Mémoire totale : 20
+| index | p_pid | p_uid | p_flag      | p_stat | p_size | p_time | p_wchan  | p_pri |
+|-------+-------+-------+-------------+--------+--------+--------+----------+-------|
+|     0 |     0 |     0 | SSYS&SLOAD  | SSLEEP |      2 |    122 | runout   |  PSWP |
+|     1 |     1 |     0 | SSYS&SLOAD  | SSLEEP |      4 |    127 | &proc[1] | PWAIT |
+|     2 |   101 |  1000 | NULL        | SSLEEP |      1 |      2 | &toto    |    50 |
+|     3 |   102 |  1000 | SLOCK&SLOAD | SSLEEP |      3 |     12 | &toto    |    50 |
+|     4 |   103 |  1000 | NULL        | SRUN   |     10 |      0 |          |    50 |
+|     5 |   104 |  1000 | NULL        | SRUN   |     10 |     12 |          |    50 |
+|     6 |   105 |  1000 | NULL        | SLEEP  |     10 |      7 | &toto    |    50 |
+
+t = 2
+Le swapper fait son quatrième passage.
+Processus prêt à rappeler : oui, 104 (il y en a même deux : 103 et 104, on prend celui qui est résident dans le swap depuis plus de temps, soit 104)
+Assez de mémoire : besoin de 10, 11 disponible, donc oui.
+On rappelle 104 en mémoire.
+Mémoire occupée : 19 Mémoire totale : 20
+| index | p_pid | p_uid | p_flag      | p_stat | p_size | p_time | p_wchan  | p_pri |
+|-------+-------+-------+-------------+--------+--------+--------+----------+-------|
+|     0 |     0 |     0 | SSYS&SLOAD  | SSLEEP |      2 |    122 | runout   |  PSWP |
+|     1 |     1 |     0 | SSYS&SLOAD  | SSLEEP |      4 |    127 | &proc[1] | PWAIT |
+|     2 |   101 |  1000 | NULL        | SSLEEP |      1 |      2 | &toto    |    50 |
+|     3 |   102 |  1000 | SLOCK&SLOAD | SSLEEP |      3 |     12 | &toto    |    50 |
+|     4 |   103 |  1000 | NULL        | SRUN   |     10 |      0 |          |    50 |
+|     5 |   104 |  1000 | SLOAD       | SRUN   |     10 |      0 |          |    50 |
+|     6 |   105 |  1000 | NULL        | SLEEP  |     10 |      7 | &toto    |    50 |
+
+104 est le seul processus prêt chargé en mémoire, il est donc élu et il commence à s'exécuter.
+
+104 commence à s'exécuter à t = 2.
+
+**** Question 3
 
 On exécute le code de swapper. On veut faire rentrer 104. Sur quelle adresse le swapper s'endort lorsque 104 s'exécute ?
 
-Réponse :
-Sur runin. En effet, pour faire rentrer 104, on a dû évincer 103, qui se trouve donc dans le swap. Mais 103 est toujours prêt, il a très envie d'exécuter sa boucle infinie. 103 veut rentrer, mais il n'y a pas de place pour lui, et personne à évincer immédiatement : le swapper s'endort donc sur runin, d'après le code de sched().
+On reprend la question 2 à la fin. On a rappelé 104 en mémoire, on refait un tour de boucle.
 
-En supposant que la signal SIGUSR1 provoque un calcul de 9 secondes sur le proc 104., combien de temps après l'envoi du signal va se terminer le calcul ?
+Y a-t-il un processus prêt à rappeler ? Oui, 103.
+Assez de mémoire ? Besoin de 10, 1 disponible, donc non.
+Procesus endormi, non système, n'ayant rien verrouillé, à évincer ? Non
+Processus à rappeler (103 donc) en swap depuis plus de 3 secondes ? Non, il vient d'arriver.
 
-103 et 104 sont les deux seuls processus qui peuvent être évincés. Toutes les 3 secondes, un des deux peut être évincé au profit de l'autre. On va donc échanger la place dans la mémoire entre 103 et 104 toutes les 3 seconde : donc 104 termine son exécution au plus tôt à 17 secondes.
+On s'endort sur runin.
 
+Répondre à la question nécessite simplement de suivre bêtement l'automate.
+
+**** Question 4
+
+En supposant que le signal SIGUSR1 provoque un calcul de 9 secondes sur le processus 104, combien de temps après l'envoi du signal va se terminer le calcul ?
+
+Le signal a été envoyé en T_0, 104 commence à s'exécuter en t = T_0 + 2 (cf. question 2)
+
+On a une pression mémoire : 103 tient absolument à revenir en mémoire pour exécuter sa boucle infinie très importante.
+
+Il doit être résident en swap depuis 3 secondes ou plus pour que le swapper le considère (en effet, tous les processus non systèmes, endormis, n'ayant rien verrouillé qu'on pouvait évincer l'ont été).
+
+Donc entre T_0 + 2 et T_0 + 5, 104 s'exécute pendant que 103 attend d'atteindre ses 3 secondes de résidence.
+
+A T_0 + 5, cette condition est remplie. Le swapper évince 104 au profit de 103. À ce moment, 3 des 9 secondes du calcul de 104 ont été accomplies.
+
+De T_0 + 5 à T_0 + 8, 103 exécute sa super boucle infinie.
+
+De T_0 + 8 à T_0 + 11, 104 exécute 3 secondes supplémentaires de son calcul
+
+De T_0 + 11 à T_0 + 14, 103 exécute sa super boucle infinie.
+
+De T_0 + 14 à T_0 + 17, 104 exécute 3 secondes supplémentaires de son calcul, qui se finit si tout se passe bien.
+
+104 va terminer son exécution *au plus tôt* à T_0 + 17.
 
 
 * TD 8 : 04/12/2019
@@ -2956,6 +3097,7 @@ close va simplement consister en :
 
 On comprend maintenant presque toutes les étapes de manipulation des fichiers sous unix. Il reste maintenant à faire le lien entre l'inode et les données du fichier.
 
+
 * TD 10 : 18/12/2019
 
 Aujourd'hui, dernière séance, la gestion des blocs de données.
@@ -3085,6 +3227,7 @@ A la sortie de la boucle, on a un niveau d'indirection soit trop grand (taille m
 Dans ce deuxième cas, on parcourt récursivement les niveaux d'indirection, en allouant les blocs si besoin est.
 
 On retourne le numéro du bloc de physique auquel on arrive.
+
 
 * Révisions
 
@@ -3235,6 +3378,7 @@ On compte deux entrées/sorties physiques, sur les blocs 402 et 1000.
 Il y aura encore une autre entrée/sortie physique quand 0-1000 se fera évincer du cache d'entrées/sorties (il a le flag DELWRI).
 
 Et on compte bien entendu autant d'E/S logiques que d'accès à des blocs, soit 9.
+
 
 * Annexes
 
